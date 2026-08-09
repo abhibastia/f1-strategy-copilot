@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Formula 1 Race Companion</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#0b0d11; --panel:#131720; --panel-2:#181d28; --line:#242b3a;
+    --fg:#e8ecf4; --muted:#8b95a8; --dim:#5c6679;
+    --accent:#e8112d;          /* F1 red */
+    --wet:#3b82f6; --dry:#f59e0b; --ok:#22c55e; --warn:#f97316;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f6; --line:#dde1e9;
+      --fg:#12151c; --muted:#5c6679; --dim:#8b95a8;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:74rem; margin:0 auto; padding:0 1.25rem 5rem; }
+  a { color:inherit; }
+
+  /* ---- header ---- */
+  header { border-bottom:1px solid var(--line); background:
+      linear-gradient(180deg, rgba(232,17,45,.10), transparent 70%); }
+  .head { max-width:74rem; margin:0 auto; padding:2.25rem 1.25rem 1.75rem; }
+  .brand { display:flex; gap:1.1rem; align-items:flex-start; }
+  .mark { width:5.5rem; height:2.2rem; flex:none; color:var(--fg); margin-top:.45rem; }
+  @media (max-width:38rem) { .brand { gap:.8rem; } .mark { width:4rem; } }
+  h1 { margin:0 0 .3rem; font-size:clamp(1.6rem,3.4vw,2.3rem); letter-spacing:-.02em; }
+  .lede { margin:0; color:var(--muted); max-width:46rem; font-size:1.02rem; }
+
+  .stats { display:grid; gap:.6rem; margin-top:1.6rem;
+           grid-template-columns:repeat(auto-fit,minmax(7.5rem,1fr)); }
+  .stat { background:var(--panel); border:1px solid var(--line);
+          border-radius:.7rem; padding:.7rem .85rem; }
+  .stat b { display:block; font-size:1.45rem; letter-spacing:-.02em; }
+  .stat span { color:var(--dim); font-size:.72rem; text-transform:uppercase;
+               letter-spacing:.07em; }
+
+  /* ---- sections ---- */
+  section { margin-top:3rem; }
+  h2 { font-size:1.18rem; margin:0 0 .3rem; letter-spacing:-.01em; }
+  h2 .num { color:var(--accent); font-variant-numeric:tabular-nums; margin-right:.5rem; }
+  .sub { color:var(--muted); margin:0 0 1.1rem; max-width:52rem; }
+
+  .panel { background:var(--panel); border:1px solid var(--line);
+           border-radius:.85rem; overflow:hidden; }
+  .panel-pad { padding:1.1rem 1.25rem; }
+
+  /* ---- thesis ---- */
+  .finding { border-left:3px solid var(--accent); background:var(--panel-2);
+             padding:.9rem 1.1rem; border-radius:.5rem; margin-bottom:1.1rem; }
+  .finding b { color:var(--accent); }
+  .cards { display:grid; gap:.85rem; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:.75rem; padding:.95rem 1rem; display:flex;
+          flex-direction:column; gap:.55rem; }
+  .card.calm { border-top:3px solid var(--ok); }
+  .card.chaos { border-top:3px solid var(--warn); }
+  .card .race { font-weight:650; letter-spacing:-.01em; }
+  .card .season { color:var(--dim); font-weight:400; }
+  .metrics { display:flex; gap:1.1rem; }
+  .metric b { display:block; font-size:1.15rem; font-variant-numeric:tabular-nums; }
+  .metric span { color:var(--dim); font-size:.68rem; text-transform:uppercase;
+                 letter-spacing:.06em; }
+  blockquote { margin:0; padding:.55rem .7rem; background:var(--panel-2);
+               border-radius:.45rem; color:var(--muted); font-size:.85rem;
+               font-style:italic; }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th,td { text-align:left; padding:.6rem .8rem; border-bottom:1px solid var(--line);
+          white-space:nowrap; }
+  th { color:var(--dim); font-weight:600; font-size:.7rem; text-transform:uppercase;
+       letter-spacing:.07em; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:var(--panel-2); }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:1rem;
+          font-size:.72rem; font-weight:600; }
+  .pill.wet { background:rgba(59,130,246,.16); color:var(--wet); }
+  .pill.dry { background:rgba(245,158,11,.14); color:var(--dry); }
+  .bar { height:.35rem; background:var(--panel-2); border-radius:1rem;
+         overflow:hidden; min-width:4rem; }
+  .bar > i { display:block; height:100%; background:var(--accent); }
+
+  /* ---- search ---- */
+  .searchbar { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:.9rem; }
+  input[type=search], select, button {
+      font:inherit; color:var(--fg); background:var(--panel);
+      border:1px solid var(--line); border-radius:.55rem; padding:.6rem .8rem; }
+  input[type=search] { flex:1; min-width:15rem; }
+  button { background:var(--accent); border-color:var(--accent); color:#fff;
+           font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  .chips { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .chip { background:var(--panel); border:1px solid var(--line); color:var(--muted);
+          border-radius:1rem; padding:.28rem .7rem; font-size:.8rem; cursor:pointer; }
+  .chip:hover { border-color:var(--accent); color:var(--fg); }
+  .hit { border:1px solid var(--line); border-radius:.7rem; padding:.85rem 1rem;
+         margin-bottom:.6rem; background:var(--panel); }
+  .hit-head { display:flex; gap:.6rem; align-items:baseline; flex-wrap:wrap;
+              margin-bottom:.4rem; }
+  .hit-head .r { font-weight:650; }
+  .hit-head .s { color:var(--dim); font-size:.8rem; }
+  .sim { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent);
+         font-weight:600; font-size:.85rem; }
+  .hit p { margin:0; color:var(--muted); font-size:.9rem; }
+
+  .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--line);
+          margin-bottom:1rem; flex-wrap:wrap; }
+  .tab { padding:.5rem .85rem; color:var(--muted); cursor:pointer;
+         border-bottom:2px solid transparent; font-size:.9rem; }
+  .tab[aria-selected=true] { color:var(--fg); border-bottom-color:var(--accent); }
+  .empty { color:var(--dim); padding:1.1rem 1.25rem; }
+  .howto { display:grid; gap:.7rem; margin-top:1.4rem;
+           grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); }
+  .how { background:var(--panel); border:1px solid var(--line);
+         border-radius:.7rem; padding:.75rem .9rem; font-size:.88rem; }
+  .how b { display:block; margin-bottom:.15rem; }
+  .how span { color:var(--muted); }
+  .how i { color:var(--accent); font-style:normal; font-weight:700;
+           margin-right:.35rem; }
+  .err { border:1px solid rgba(232,17,45,.5); background:rgba(232,17,45,.07);
+         border-radius:.7rem; padding:1rem 1.2rem; }
+  footer { margin-top:3.5rem; padding-top:1.2rem; border-top:1px solid var(--line);
+           color:var(--dim); font-size:.85rem; }
+  code { background:var(--panel-2); padding:.1rem .35rem; border-radius:.3rem;
+         font-size:.85em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head">
+    <div class="brand">
+      <!-- Motorsport mark drawn inline rather than the official Formula 1
+           logo, which is a registered trademark of Formula One World
+           Championship Ltd. Inline SVG also keeps the page self-contained:
+           no external asset to fetch, nothing to break behind app auth. -->
+      <svg class="mark" viewBox="0 0 120 48" role="img" aria-label="Race Companion">
+        <defs>
+          <linearGradient id="speed" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="var(--accent)" stop-opacity=".25"/>
+            <stop offset="100%" stop-color="var(--accent)"/>
+          </linearGradient>
+        </defs>
+        <rect x="0"  y="6"  width="46" height="5" rx="2.5" fill="url(#speed)"/>
+        <rect x="8"  y="16" width="54" height="5" rx="2.5" fill="url(#speed)"/>
+        <rect x="2"  y="26" width="38" height="5" rx="2.5" fill="url(#speed)"/>
+        <g transform="translate(66,4)">
+          <rect width="10" height="10" fill="currentColor"/>
+          <rect x="10" y="10" width="10" height="10" fill="currentColor"/>
+          <rect x="20" width="10" height="10" fill="currentColor"/>
+          <rect y="20" width="10" height="10" fill="currentColor"/>
+          <rect x="10" y="30" width="10" height="10" fill="currentColor"/>
+          <rect x="20" y="20" width="10" height="10" fill="currentColor"/>
+        </g>
+      </svg>
+      <div>
+        <h1>Formula 1 Race Companion</h1>
+        <p class="lede">
+          Race results, the story of 58 race reports, and the weather that was
+          actually measured at each circuit — in one place, so you can ask
+          questions that need all three at once.
+        </p>
+      </div>
+    </div>
+
+    {% if stats %}
+    <div class="stats">
+      <div class="stat"><b>{{ stats.races }}</b><span>Races</span></div>
+      <div class="stat"><b>{{ stats.results }}</b><span>Race results</span></div>
+      <div class="stat"><b>{{ stats.documents }}</b><span>Report sections</span></div>
+      <div class="stat"><b>{{ stats.embeddings }}</b><span>Embeddings</span></div>
+      <div class="stat"><b>{{ stats.weather }}</b><span>Weather obs.</span></div>
+      <div class="stat"><b>{{ stats.wet_races }}</b><span>Wet races</span></div>
+      <div class="stat"><b>{{ stats.seasons }}</b><span>Seasons</span></div>
+    </div>
+    {% endif %}
+
+    <div class="howto">
+      <div class="how"><b><i>1</i>Read the finding</b>
+        <span>Why "it rained" and "it was a wet race" are not the same thing.</span></div>
+      <div class="how"><b><i>2</i>Search the reports</b>
+        <span>Describe a race in your own words — no keywords needed.</span></div>
+      <div class="how"><b><i>3</i>Explore a season</b>
+        <span>Every race, its winner, and the weather actually recorded.</span></div>
+      <div class="how"><b><i>4</i>Ask the assistant</b>
+        <span>It can look things up <em>and</em> save watchlists, predictions and notes.</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+{% if error %}
+  <section>
+    <div class="err">
+      <b>Could not load data from Lakebase.</b>
+      <p style="margin:.5rem 0 0"><code>{{ error }}</code></p>
+      <p style="margin:.5rem 0 0; color:var(--muted)">
+        The most likely cause is that this app's service principal lacks
+        <code>READ</code> on the <code>database</code> secret scope.
+      </p>
+    </div>
+  </section>
+{% else %}
+
+  <!-- ===================== THE FINDING ===================== -->
+  <section>
+    <h2><span class="num">01</span>Was it a wet race, or just a wet day?</h2>
+    <p class="sub">
+      The obvious question for this dataset is whether rain makes a race chaotic.
+      Measured rainfall alone says it barely does — and the reason turns out to be
+      the most interesting thing in the project.
+    </p>
+
+    <div class="finding">
+      Across 59 races, going from <b>any race</b> to <b>15 mm or more of rain</b>
+      moves the retirement rate only from
+      <b>{{ thresholds[0].dnf_pct }}%</b> to <b>{{ thresholds[-1].dnf_pct }}%</b>.
+      Daily rainfall is a <b>weak predictor</b> of a chaotic race.
+    </div>
+
+    <div class="panel scroll">
+      <table>
+        <thead><tr>
+          <th>Rainfall threshold</th><th class="num">Races</th>
+          <th class="num">Retirement rate</th><th class="num">Avg position change</th>
+          <th style="width:30%">DNF %</th>
+        </tr></thead>
+        <tbody>
+        {% for t in thresholds %}
+          <tr>
+            <td>{{ "any race" if t.threshold == 0.0 else "≥ %.0f mm"|format(t.threshold) }}</td>
+            <td class="num">{{ t.races }}</td>
+            <td class="num">{{ t.dnf_pct }}%</td>
+            <td class="num">{{ t.pos_change }}</td>
+            <td><div class="bar"><i style="width:{{ (t.dnf_pct|float / 20 * 100)|round(1) }}%"></i></div></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <p class="sub" style="margin-top:1.4rem">
+      Averages hide the real story. Four races with almost identical rainfall
+      produced completely different outcomes — and the race reports say why.
+    </p>
+
+    <div class="cards">
+      {% for r in thesis %}
+        <div class="card {{ 'calm' if r.dnf_pct|float < 12 else 'chaos' }}">
+          <div class="race">
+            {{ r.race_name }} <span class="season">{{ r.season }}</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><b>{{ r.precipitation_mm }} mm</b><span>Rainfall</span></div>
+            <div class="metric"><b>{{ r.dnf_pct }}%</b><span>Retired</span></div>
+            <div class="metric"><b>{{ r.pos_change }}</b><span>Pos. change</span></div>
+          </div>
+          {% if r.evidence %}
+            <blockquote>“{{ r.evidence }}”</blockquote>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="finding" style="margin-top:1.1rem">
+      <b>Why the split.</b> The weather archive reports a daily total. It cannot
+      distinguish rain that fell overnight from rain that fell during the race.
+      The narrative can — Monza 2024 saw the most rain of any race here and stayed
+      calm because the report notes only “a greater chance of rain than initially
+      forecast”, while São Paulo ran “in rainy conditions on a wet track”.
+      <b>Neither source is trustworthy alone.</b> That is why this project embeds
+      race reports instead of only querying results.
+    </div>
+  </section>
+
+  <!-- ===================== SEARCH ===================== -->
+  <section>
+    <h2><span class="num">02</span>Search the race reports</h2>
+    <p class="sub">
+      Search 58 race reports by meaning rather than keywords — describe the race you have in mind.
+      Every result shows the weather measured at that circuit that day, so you
+      can see whether the story and the rainfall agree.
+    </p>
+
+    <form class="searchbar" onsubmit="runSearch(event)">
+      <input type="search" id="q" placeholder="e.g. chaotic wet race decided by a safety car"
+             value="chaotic wet race decided by a safety car" aria-label="Search race reports">
+      <select id="season" aria-label="Season filter">
+        <option value="">All seasons</option>
+        {% for s in seasons %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+      <button type="submit">Search</button>
+    </form>
+
+    <div class="chips">
+      {% for c in ["dramatic last lap overtake", "safety car changed the result",
+                   "tyre strategy gamble that paid off", "first win for a driver",
+                   "crash on the opening lap"] %}
+        <span class="chip" onclick="quick(this.textContent.trim())">{{ c }}</span>
+      {% endfor %}
+    </div>
+
+    <div id="results"><p class="empty">Press Search to run the query above.</p></div>
+  </section>
+
+  <!-- ===================== SEASON ===================== -->
+  <section>
+    <h2><span class="num">03</span>Season explorer</h2>
+    <p class="sub">Every race with its winner and measured conditions.</p>
+
+    <div class="tabs">
+      {% for s in seasons %}
+        <a class="tab" href="?season={{ s }}" aria-selected="{{ 'true' if s == season else 'false' }}">{{ s }}</a>
+      {% endfor %}
+    </div>
+
+    <div class="panel scroll">
+      <table>
+        <thead><tr>
+          <th class="num">R</th><th>Grand Prix</th><th>Circuit</th><th>Date</th>
+          <th>Winner</th><th>Conditions</th><th class="num">Rain</th><th class="num">Report</th>
+        </tr></thead>
+        <tbody>
+        {% for r in races %}
+          <tr>
+            <td class="num">{{ r.round }}</td>
+            <td>{{ r.race_name }}</td>
+            <td>{{ r.circuit_name }}<span style="color:var(--dim)"> · {{ r.circuit_country }}</span></td>
+            <td>{{ r.race_date }}</td>
+            <td>{{ r.winner or "—" }}</td>
+            <td>
+              {% if r.conditions %}
+                <span class="pill {{ 'wet' if r.was_wet else 'dry' }}">{{ r.conditions }}</span>
+              {% else %}<span style="color:var(--dim)">no data</span>{% endif %}
+            </td>
+            <td class="num">{{ (r.precipitation_mm ~ " mm") if r.precipitation_mm is not none else "—" }}</td>
+            <td class="num">{{ r.report_sections or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if standings %}
+    <h2 style="margin-top:2rem"><span class="num">04</span>{{ season }} championship</h2>
+    <p class="sub">Standings after the latest round on record.</p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th class="num">Pos</th><th>Driver</th><th>Constructor</th>
+          <th class="num">Points</th><th class="num">Wins</th></tr></thead>
+        <tbody>
+        {% for s in standings %}
+          <tr>
+            <td class="num">{{ s.championship_position }}</td>
+            <td>{{ s.driver_name }}</td>
+            <td>{{ s.constructor_name_as_of_race }}</td>
+            <td class="num">{{ s.cumulative_points }}</td>
+            <td class="num">{{ s.cumulative_wins }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- ===================== AGENT ===================== -->
+  <section>
+    <h2><span class="num">05</span>What the agent has done</h2>
+    <p class="sub">
+      This page only reads. Everything below was created by the assistant when
+      someone asked it to — track a driver, log a prediction before a race, save
+      a note about what happened. Ask it in chat, then reload this page to see
+      the result appear.
+    </p>
+
+    <div class="cards">
+      <div class="panel">
+        <div class="panel-pad"><b>Watchlist</b>
+          <span style="color:var(--dim)"> · {{ activity.watchlist|length }}</span></div>
+        {% if activity.watchlist %}
+          <div class="scroll"><table><tbody>
+          {% for w in activity.watchlist %}
+            <tr><td>{{ w.entity_ref }}<div style="color:var(--dim);font-size:.8rem">{{ w.entity_type }}{% if w.note %} · {{ w.note }}{% endif %}</div></td></tr>
+          {% endfor %}
+          </tbody></table></div>
+        {% else %}<div class="empty">Nothing tracked yet.</div>{% endif %}
+      </div>
+
+      <div class="panel">
+        <div class="panel-pad"><b>Predictions</b>
+          <span style="color:var(--dim)"> · {{ activity.predictions|length }}</span></div>
+        {% if activity.predictions %}
+          <div class="scroll"><table><tbody>
+          {% for p in activity.predictions %}
+            <tr><td>{{ p.prediction }}
+              <div style="color:var(--dim);font-size:.8rem">
+                {{ p.season }} {{ p.race_name or "R" ~ p.round }} · {{ p.confidence }}
+              </div></td></tr>
+          {% endfor %}
+          </tbody></table></div>
+        {% else %}<div class="empty">No predictions logged yet.</div>{% endif %}
+      </div>
+
+      <div class="panel">
+        <div class="panel-pad"><b>Race notes</b>
+          <span style="color:var(--dim)"> · {{ activity.notes|length }}</span></div>
+        {% if activity.notes %}
+          <div class="scroll"><table><tbody>
+          {% for n in activity.notes %}
+            <tr><td>{{ n.note }}
+              <div style="color:var(--dim);font-size:.8rem">{{ n.season }} {{ n.race_name or "R" ~ n.round }}</div></td></tr>
+          {% endfor %}
+          </tbody></table></div>
+        {% else %}<div class="empty">No notes saved yet.</div>{% endif %}
+      </div>
+    </div>
+  </section>
+
+{% endif %}
+
+  <footer>
+    Race data: Jolpica-F1 · Race reports: Wikipedia · Weather: Open-Meteo
+    historical archive. Assistant tools served from
+    <a href="{{ mcp_url }}">{{ mcp_url }}</a>.
+  </footer>
+</div>
+
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function quick(text) {
+  document.getElementById("q").value = text;
+  runSearch(new Event("submit"));
+}
+
+async function runSearch(ev) {
+  ev.preventDefault();
+  const q = document.getElementById("q").value.trim();
+  const season = document.getElementById("season").value;
+  const out = document.getElementById("results");
+  if (!q) { out.innerHTML = '<p class="empty">Enter something to search for.</p>'; return; }
+  out.innerHTML = '<p class="empty">Searching…</p>';
+
+  const url = "/api/search?q=" + encodeURIComponent(q) + (season ? "&season=" + season : "");
+  let data;
+  try {
+    const r = await fetch(url);
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Search failed");
+  } catch (e) {
+    out.innerHTML = '<p class="empty">' + esc(e.message) + '</p>';
+    return;
+  }
+  if (!data.results.length) {
+    out.innerHTML = '<p class="empty">No passages matched.</p>';
+    return;
+  }
+  out.innerHTML = data.results.map(r => `
+    <div class="hit">
+      <div class="hit-head">
+        <span class="r">${esc(r.race_name)}</span>
+        <span class="s">${esc(r.season)} · round ${esc(r.round)} · ${esc(r.section)}</span>
+        ${r.conditions ? `<span class="pill ${r.was_wet ? "wet" : "dry"}">${esc(r.conditions)}${
+            r.precipitation_mm != null ? " · " + esc(r.precipitation_mm) + " mm" : ""}</span>` : ""}
+        <span class="sim">${Number(r.similarity).toFixed(3)}</span>
+      </div>
+      <p>${esc(r.chunk_text).slice(0, 420)}…</p>
+    </div>`).join("");
+}
+</script>
+</body>
+</html>
