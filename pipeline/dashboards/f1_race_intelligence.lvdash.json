@@ -1,0 +1,590 @@
+{
+  "datasets": [
+    {
+      "name": "ds_championship",
+      "displayName": "Championship progression",
+      "queryLines": [
+        "SELECT season, round, race_date, race_name, driver_id, driver_name,\n",
+        "       constructor_name_as_of_race AS constructor, cumulative_points,\n",
+        "       championship_position, gap_to_leader, points_gained_in_round,\n",
+        "       position_change_vs_prev_round\n",
+        "FROM championship_progression"
+      ]
+    },
+    {
+      "name": "ds_driver_perf",
+      "displayName": "Driver performance",
+      "queryLines": [
+        "SELECT season, round, race_date, race_name, circuit_name, circuit_country,\n",
+        "       driver_id, driver_name, driver_code,\n",
+        "       constructor_name_as_of_race AS constructor,\n",
+        "       grid_position, finish_position, positions_gained,\n",
+        "       race_points, sprint_points, total_points, laps_completed,\n",
+        "       status, dnf_flag, is_win, is_podium, is_points_finish,\n",
+        "       quali_position, quali_to_finish_delta\n",
+        "FROM driver_performance"
+      ]
+    },
+    {
+      "name": "ds_driver_season",
+      "displayName": "Driver season summary",
+      "queryLines": [
+        "SELECT season, driver_name, constructor_name_as_of_race AS constructor,\n",
+        "       COUNT(*)                                    AS races,\n",
+        "       SUM(total_points)                           AS points,\n",
+        "       SUM(CASE WHEN is_win THEN 1 ELSE 0 END)     AS wins,\n",
+        "       SUM(CASE WHEN is_podium THEN 1 ELSE 0 END)  AS podiums,\n",
+        "       ROUND(AVG(finish_position), 2)              AS avg_finish,\n",
+        "       SUM(positions_gained)                       AS net_positions_gained,\n",
+        "       ROUND(100.0 * SUM(CASE WHEN dnf_flag THEN 1 ELSE 0 END) / COUNT(*), 1) AS dnf_rate_pct\n",
+        "FROM driver_performance\n",
+        "GROUP BY season, driver_name, constructor_name_as_of_race"
+      ]
+    },
+    {
+      "name": "ds_constructor_season",
+      "displayName": "Constructor season points",
+      "queryLines": [
+        "SELECT season, constructor_name_as_of_race AS constructor,\n",
+        "       SUM(total_points) AS points,\n",
+        "       SUM(CASE WHEN is_win THEN 1 ELSE 0 END) AS wins\n",
+        "FROM driver_performance\n",
+        "WHERE constructor_name_as_of_race IS NOT NULL\n",
+        "GROUP BY season, constructor_name_as_of_race"
+      ]
+    },
+    {
+      "name": "ds_dq",
+      "displayName": "Data quality by run",
+      "queryLines": [
+        "WITH e AS (\n",
+        "  SELECT origin.update_id AS update_id, timestamp AS event_time,\n",
+        "         origin.flow_name AS dataset_name,\n",
+        "         explode(from_json(\n",
+        "           get_json_object(details, '$.flow_progress.data_quality.expectations'),\n",
+        "           'ARRAY<STRUCT<name STRING, passed_records BIGINT, failed_records BIGINT>>'\n",
+        "         )) AS x\n",
+        "  FROM pipeline_event_log\n",
+        "  WHERE event_type = 'flow_progress'\n",
+        "    AND get_json_object(details, '$.flow_progress.data_quality.expectations') IS NOT NULL\n",
+        ")\n",
+        "SELECT dataset_name, x.name AS expectation_name,\n",
+        "       SUM(x.passed_records) AS passed_records,\n",
+        "       SUM(x.failed_records) AS failed_records,\n",
+        "       MAX(event_time)       AS last_run\n",
+        "FROM e GROUP BY dataset_name, x.name"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_overview",
+      "displayName": "Championship & Driver Performance",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter_season",
+            "queries": [
+              {
+                "name": "f_season",
+                "query": {
+                  "datasetName": "ds_championship",
+                  "fields": [
+                    {
+                      "name": "season",
+                      "expression": "`season`"
+                    },
+                    {
+                      "name": "season_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "season",
+                    "displayName": "Season",
+                    "queryName": "f_season"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Season",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_points",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_driver_perf",
+                  "fields": [
+                    {
+                      "name": "sum(total_points)",
+                      "expression": "SUM(`total_points`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_points)",
+                  "displayName": "Points awarded"
+                }
+              },
+              "frame": {
+                "title": "Points awarded",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_races",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_driver_perf",
+                  "fields": [
+                    {
+                      "name": "races",
+                      "expression": "COUNT(DISTINCT CONCAT(`season`, '-', `round`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "races",
+                  "displayName": "Races"
+                }
+              },
+              "frame": {
+                "title": "Races covered",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_progression",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_championship",
+                  "fields": [
+                    {
+                      "name": "round",
+                      "expression": "`round`"
+                    },
+                    {
+                      "name": "driver_name",
+                      "expression": "`driver_name`"
+                    },
+                    {
+                      "name": "sum(cumulative_points)",
+                      "expression": "SUM(`cumulative_points`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "round",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Round"
+                },
+                "y": {
+                  "fieldName": "sum(cumulative_points)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Cumulative points"
+                },
+                "color": {
+                  "fieldName": "driver_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Driver"
+                }
+              },
+              "frame": {
+                "title": "Championship progression by round",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_grid_vs_finish",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_driver_perf",
+                  "fields": [
+                    {
+                      "name": "grid_position",
+                      "expression": "`grid_position`"
+                    },
+                    {
+                      "name": "finish_position",
+                      "expression": "`finish_position`"
+                    },
+                    {
+                      "name": "driver_name",
+                      "expression": "`driver_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "grid_position",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Grid position"
+                },
+                "y": {
+                  "fieldName": "finish_position",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Finish position"
+                },
+                "color": {
+                  "fieldName": "driver_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Driver"
+                }
+              },
+              "frame": {
+                "title": "Grid vs finish \u2014 who gains places",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_constructor_points",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_constructor_season",
+                  "fields": [
+                    {
+                      "name": "constructor",
+                      "expression": "`constructor`"
+                    },
+                    {
+                      "name": "sum(points)",
+                      "expression": "SUM(`points`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(points)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Points"
+                },
+                "y": {
+                  "fieldName": "constructor",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Constructor"
+                }
+              },
+              "frame": {
+                "title": "Constructor points",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_driver_season",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_driver_season",
+                  "fields": [
+                    {
+                      "name": "driver_name",
+                      "expression": "`driver_name`"
+                    },
+                    {
+                      "name": "constructor",
+                      "expression": "`constructor`"
+                    },
+                    {
+                      "name": "points",
+                      "expression": "`points`"
+                    },
+                    {
+                      "name": "wins",
+                      "expression": "`wins`"
+                    },
+                    {
+                      "name": "podiums",
+                      "expression": "`podiums`"
+                    },
+                    {
+                      "name": "avg_finish",
+                      "expression": "`avg_finish`"
+                    },
+                    {
+                      "name": "net_positions_gained",
+                      "expression": "`net_positions_gained`"
+                    },
+                    {
+                      "name": "dnf_rate_pct",
+                      "expression": "`dnf_rate_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "driver_name",
+                    "displayName": "Driver",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "constructor",
+                    "displayName": "Constructor",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "points",
+                    "displayName": "Points",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "wins",
+                    "displayName": "Wins",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "podiums",
+                    "displayName": "Podiums",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "avg_finish",
+                    "displayName": "Avg finish",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "net_positions_gained",
+                    "displayName": "Net places gained",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "dnf_rate_pct",
+                    "displayName": "DNF %",
+                    "type": "float"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Driver season summary",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_dq",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq",
+                  "fields": [
+                    {
+                      "name": "dataset_name",
+                      "expression": "`dataset_name`"
+                    },
+                    {
+                      "name": "expectation_name",
+                      "expression": "`expectation_name`"
+                    },
+                    {
+                      "name": "passed_records",
+                      "expression": "`passed_records`"
+                    },
+                    {
+                      "name": "failed_records",
+                      "expression": "`failed_records`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "dataset_name",
+                    "displayName": "Dataset",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "expectation_name",
+                    "displayName": "Expectation",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "passed_records",
+                    "displayName": "Passed",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "failed_records",
+                    "displayName": "Failed",
+                    "type": "integer"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Data quality \u2014 expectations per run",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 13,
+            "width": 2,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+# Declarative Automation Bundle for the F1 Race Intelligence platform.
+#
+# Deploy:  databricks bundle deploy -t dev
+# Run:     databricks bundle run f1_medallion_pipeline -t dev
+#
+# What this bundle does NOT own: the catalog, the schemas, and the landing
+# Volume. Databricks Free Edition refuses catalog creation over the API, and
+# those objects already exist and hold the raw data — letting the bundle try to
+# manage them would only produce conflicts. They are provisioned once by
+# scripts/create_catalog.sh; the bundle owns the pipeline, job and dashboard.
+
+bundle:
+  name: f1_race_intelligence
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog holding the bronze/silver/gold schemas.
+    default: f1
+  landing_root:
+    description: UC Volume path holding the raw Jolpica JSON payloads.
+    default: /Volumes/f1/raw/landing
+  warehouse_id:
+    description: SQL warehouse backing the AI/BI dashboard.
+    default: 6797e114217fa513
+
+targets:
+  # Default target. `mode: development` prefixes resource names with
+  # [dev <user>], pauses all schedules, and puts the pipeline in development
+  # mode — which is what you want while iterating on a limited compute budget.
+  dev:
+    default: true
+    mode: development
+    workspace:
+      host: https://dbc-6b3a5534-db75.cloud.databricks.com
+      profile: abhi
+
+  # Production target. It deliberately points at a *different* catalog: on Free
+  # Edition there is only one workspace, so if prod shared `f1` both targets
+  # would write the same tables and a prod deploy would silently collide with
+  # dev. Create `f1_prod` in the UI before deploying this target.
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-6b3a5534-db75.cloud.databricks.com
+      profile: abhi
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: f1_prod
+      landing_root: /Volumes/f1_prod/raw/landing
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE

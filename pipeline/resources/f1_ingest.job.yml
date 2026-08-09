@@ -1,0 +1,45 @@
+# Weekly ingestion, then a pipeline refresh.
+#
+# Tuesday 06:00 UTC: after every race weekend, before the next one. In the dev
+# target the bundle pauses this schedule automatically, so it will not consume
+# compute while you are iterating.
+#
+# The two tasks are ordered deliberately: ingest lands any new round in the
+# Volume, then the pipeline picks it up. Running the pipeline first would
+# process nothing new.
+
+resources:
+  jobs:
+    f1_ingest_incremental:
+      name: f1_ingest_incremental
+
+      tasks:
+        - task_key: ingest
+          spark_python_task:
+            python_file: ../src/ingestion/ingest.py
+            # Incremental mode pulls only the live season, and the writer skips
+            # rounds that are already closed — roughly 8 API calls per run.
+            parameters:
+              - --mode
+              - incremental
+              - --root
+              - ${var.landing_root}
+          environment_key: serverless_default
+
+        - task_key: refresh_pipeline
+          depends_on:
+            - task_key: ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.f1_medallion_pipeline.id}
+
+      environments:
+        - environment_key: serverless_default
+          spec:
+            client: "3"
+
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * TUE"
+        timezone_id: UTC
+
+      # A second concurrent run would re-pull the same open round for no gain.
+      max_concurrent_runs: 1
