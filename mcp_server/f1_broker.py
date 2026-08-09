@@ -1,0 +1,438 @@
+"""
+Data access for the F1 MCP server — every query and every write lives here.
+
+The tools in `f1_mcp_server.py` stay thin: validate arguments, call one function
+here, shape the result. Nothing in this module knows MCP exists, which is what
+makes the F1 logic testable with a plain Python call — no agent, no MCP client,
+no deployed app.
+
+EVERYTHING READS POSTGRES, NOTHING READS DELTA
+----------------------------------------------
+The Spark pipeline's Gold marts were seeded into Lakebase once (see
+`f1lake/seed_gold.py`). Serving them from Postgres means an agent turn costs no
+Databricks compute — which matters because Free Edition's daily quota is
+unrecoverable until the next day, and an agent that spends compute per question
+is an agent that dies mid-demo.
+
+IDENTITY RESOLUTION IS RETURNED, NEVER ASSUMED
+-----------------------------------------------
+Users say "Verstappen"; the data says `driver_id='max_verstappen'`. Every read
+that resolves a name returns what it matched, so a wrong match is visible in the
+agent's answer rather than silently wrong. That is the `resolved_location`
+lesson from the weather MCP server, applied to drivers and races.
+"""
+
+import logging
+
+from f1lake import embedder, schema
+
+logger = logging.getLogger("f1-broker")
+
+DRIVERS = "f1_driver_performance"
+CHAMPIONSHIP = "f1_championship"
+
+MAX_RESULTS = 25
+
+
+class UnknownDriverError(ValueError):
+    """The driver string could not be resolved to exactly one driver."""
+
+
+class UnknownRaceError(ValueError):
+    """The race could not be resolved."""
+
+
+# --------------------------------------------------------------------------
+# Resolution
+# --------------------------------------------------------------------------
+
+def resolve_driver(name: str, season: int | None = None) -> dict:
+    """Resolve a free-text driver reference to a single driver.
+
+    Matches against driver_id, full name and the three-letter code, in that
+    order of specificity. An ambiguous match raises rather than silently
+    picking the first — "Schumacher" should ask a question, not guess.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise UnknownDriverError("Driver must be a non-empty string")
+    needle = name.strip().lower()
+
+    where = "WHERE (lower(driver_id) = %s OR lower(driver_name) = %s OR lower(driver_code) = %s)"
+    params: list = [needle, needle, needle]
+    if season:
+        where += " AND season = %s"
+        params.append(int(season))
+
+    exact = schema.query(
+        f"SELECT DISTINCT driver_id, driver_name, driver_code FROM {DRIVERS} {where}",
+        tuple(params),
+    )
+    if len(exact) == 1:
+        return exact[0]
+
+    # Fall back to a substring match, which is what catches "verstappen".
+    where = "WHERE (lower(driver_name) LIKE %s OR lower(driver_id) LIKE %s)"
+    params = [f"%{needle}%", f"%{needle}%"]
+    if season:
+        where += " AND season = %s"
+        params.append(int(season))
+
+    fuzzy = schema.query(
+        f"SELECT DISTINCT driver_id, driver_name, driver_code FROM {DRIVERS} {where} "
+        f"ORDER BY driver_name",
+        tuple(params),
+    )
+    if not fuzzy:
+        raise UnknownDriverError(
+            f"No driver matching {name!r}"
+            + (f" in {season}" if season else "")
+        )
+    if len(fuzzy) > 1:
+        options = ", ".join(d["driver_name"] for d in fuzzy[:6])
+        raise UnknownDriverError(
+            f"{name!r} matches several drivers: {options}. Ask which one."
+        )
+    return fuzzy[0]
+
+
+def resolve_race(season: int, round_or_name) -> dict:
+    """Resolve (season, round) or (season, race name) to one race."""
+    season = int(season)
+    try:
+        rnd = int(round_or_name)
+        rows = schema.query(
+            f"SELECT season, round, race_name, race_date, circuit_name "
+            f"FROM {schema.RACES} WHERE season = %s AND round = %s",
+            (season, rnd),
+        )
+    except (TypeError, ValueError):
+        rows = schema.query(
+            f"SELECT season, round, race_name, race_date, circuit_name "
+            f"FROM {schema.RACES} WHERE season = %s AND lower(race_name) LIKE %s "
+            f"ORDER BY round",
+            (season, f"%{str(round_or_name).strip().lower()}%"),
+        )
+    if not rows:
+        raise UnknownRaceError(f"No race matching {round_or_name!r} in {season}")
+    if len(rows) > 1:
+        options = ", ".join(f"R{r['round']} {r['race_name']}" for r in rows[:6])
+        raise UnknownRaceError(
+            f"{round_or_name!r} matches several races in {season}: {options}"
+        )
+    return rows[0]
+
+
+# --------------------------------------------------------------------------
+# Reads
+# --------------------------------------------------------------------------
+
+def driver_season(name: str, season: int) -> dict:
+    """A driver's race-by-race season, with totals."""
+    driver = resolve_driver(name, season)
+    rows = schema.query(
+        f"""SELECT season, round, race_name, race_date, circuit_name,
+                   constructor_name_as_of_race, grid_position, finish_position,
+                   position_text, positions_gained, race_points, sprint_points,
+                   total_points, is_win, is_podium, dnf_flag, status
+            FROM {DRIVERS}
+            WHERE driver_id = %s AND season = %s
+            ORDER BY round""",
+        (driver["driver_id"], int(season)),
+    )
+    if not rows:
+        raise UnknownDriverError(
+            f"{driver['driver_name']} has no {season} races on record"
+        )
+
+    def total(field):
+        return sum(float(r[field] or 0) for r in rows)
+
+    return {
+        "resolved_driver": driver["driver_name"],
+        "driver_id": driver["driver_id"],
+        "season": int(season),
+        "races": len(rows),
+        "total_points": round(total("total_points"), 1),
+        "wins": sum(1 for r in rows if str(r["is_win"]).lower() in ("true", "1")),
+        "podiums": sum(1 for r in rows if str(r["is_podium"]).lower() in ("true", "1")),
+        "dnfs": sum(1 for r in rows if str(r["dnf_flag"]).lower() in ("true", "1")),
+        "constructors": sorted({r["constructor_name_as_of_race"] for r in rows
+                                if r["constructor_name_as_of_race"]}),
+        "results": rows,
+    }
+
+
+def compare_constructors(a: str, b: str, season: int) -> dict:
+    """Compare two constructors' season form, side by side."""
+    season = int(season)
+    out = {}
+    for label in (a, b):
+        rows = schema.query(
+            f"""SELECT constructor_name_as_of_race AS constructor,
+                       count(*) AS entries,
+                       sum(COALESCE(total_points, 0)) AS points,
+                       sum(CASE WHEN lower(is_win::text) IN ('true','1') THEN 1 ELSE 0 END) AS wins,
+                       sum(CASE WHEN lower(is_podium::text) IN ('true','1') THEN 1 ELSE 0 END) AS podiums,
+                       sum(CASE WHEN lower(dnf_flag::text) IN ('true','1') THEN 1 ELSE 0 END) AS dnfs,
+                       avg(NULLIF(finish_position, 0)) AS avg_finish
+                FROM {DRIVERS}
+                WHERE season = %s AND lower(constructor_name_as_of_race) LIKE %s
+                GROUP BY constructor_name_as_of_race""",
+            (season, f"%{str(label).strip().lower()}%"),
+        )
+        if not rows:
+            raise UnknownDriverError(f"No constructor matching {label!r} in {season}")
+        row = rows[0]
+        out[label] = {
+            "resolved_constructor": row["constructor"],
+            "entries": int(row["entries"]),
+            "points": round(float(row["points"] or 0), 1),
+            "wins": int(row["wins"]),
+            "podiums": int(row["podiums"]),
+            "dnfs": int(row["dnfs"]),
+            "avg_finish": round(float(row["avg_finish"]), 2) if row["avg_finish"] else None,
+        }
+
+    first, second = out[a], out[b]
+    leader = (first if first["points"] >= second["points"] else second)
+    return {
+        "season": season,
+        "compared": out,
+        "ahead_on_points": leader["resolved_constructor"],
+        "points_gap": round(abs(first["points"] - second["points"]), 1),
+    }
+
+
+def championship_standings(season: int, round_: int | None = None) -> dict:
+    """Championship state after a given round, or after the latest round."""
+    season = int(season)
+    if round_ is None:
+        latest = schema.query(
+            f"SELECT max(round) AS r FROM {CHAMPIONSHIP} WHERE season = %s", (season,)
+        )
+        round_ = latest[0]["r"] if latest and latest[0]["r"] is not None else None
+        if round_ is None:
+            raise UnknownRaceError(f"No championship data for {season}")
+    round_ = int(round_)
+
+    rows = schema.query(
+        f"""SELECT championship_position, driver_id, driver_name,
+                   constructor_name_as_of_race, cumulative_points, cumulative_wins,
+                   gap_to_leader, points_gained_in_round, position_change_vs_prev_round
+            FROM {CHAMPIONSHIP}
+            WHERE season = %s AND round = %s
+            ORDER BY championship_position""",
+        (season, round_),
+    )
+    if not rows:
+        raise UnknownRaceError(f"No standings for {season} round {round_}")
+    return {"season": season, "round": round_, "standings": rows,
+            "leader": rows[0]["driver_name"] if rows else None}
+
+
+def race_weather(season: int, round_or_name) -> dict:
+    """Measured race-day weather for one race."""
+    race = resolve_race(season, round_or_name)
+    rows = schema.query(
+        f"""SELECT season, round, race_name, race_date, circuit_name, conditions,
+                   temp_max, temp_min, temp_mean, precipitation_mm, rain_mm,
+                   wind_speed_max, wind_gusts_max, was_wet, wet_threshold_mm, source
+            FROM {schema.WEATHER} WHERE season = %s AND round = %s""",
+        (race["season"], race["round"]),
+    )
+    if not rows:
+        return {
+            "resolved_race": race["race_name"], "season": race["season"],
+            "round": race["round"], "weather_available": False,
+            "note": "No weather observation for this race. The archive lags "
+                    "about five days, so very recent races have none yet. "
+                    "This means NO DATA, not fair weather.",
+        }
+    observation = dict(rows[0])
+    observation["resolved_race"] = race["race_name"]
+    observation["weather_available"] = True
+    return observation
+
+
+def wet_races(season: int | None = None, limit: int = 10) -> dict:
+    """Races where measured rainfall crossed the wet threshold."""
+    limit = max(1, min(int(limit), MAX_RESULTS))
+    where, params = "WHERE was_wet", []
+    if season:
+        where += " AND season = %s"
+        params.append(int(season))
+    params.append(limit)
+    rows = schema.query(
+        f"""SELECT season, round, race_name, race_date, circuit_name, conditions,
+                   precipitation_mm, temp_max, wind_gusts_max, wet_threshold_mm
+            FROM {schema.WEATHER} {where}
+            ORDER BY precipitation_mm DESC LIMIT %s""",
+        tuple(params),
+    )
+    return {
+        "season": int(season) if season else "all",
+        "wet_race_count": len(rows),
+        "threshold_mm": rows[0]["wet_threshold_mm"] if rows else 1.0,
+        "races": rows,
+        "note": "Wetness is measured rainfall from the weather archive, not a "
+                "description taken from the race report.",
+    }
+
+
+def search_reports(query: str, top_k: int = 5, season: int | None = None,
+                   round_: int | None = None) -> dict:
+    """Semantic search over race-report prose, joined to measured weather."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+    top_k = max(1, min(int(top_k), MAX_RESULTS))
+
+    vector = embedder.to_pgvector(embedder.embed_query(query.strip()))
+    clauses, params = [], [vector]
+    if season:
+        clauses.append("e.season = %s")
+        params.append(int(season))
+    if round_ is not None:
+        clauses.append("e.round = %s")
+        params.append(int(round_))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params += [vector, top_k]
+
+    # The filter is composed here rather than as a `WHERE (%s IS NULL OR ...)`
+    # catch-all: that form is opaque to the planner and makes it order the HNSW
+    # scan over rows it will then discard.
+    rows = schema.query(
+        f"""SELECT e.season, e.round, d.race_name, d.race_date, e.section,
+                   d.url, e.chunk_text,
+                   1 - (e.embedding <=> %s::vector) AS similarity,
+                   w.was_wet, w.precipitation_mm, w.conditions
+            FROM {schema.EMBEDDINGS} e
+            JOIN {schema.DOCUMENTS} d ON d.id = e.document_id
+            LEFT JOIN {schema.WEATHER} w ON w.season = e.season AND w.round = e.round
+            {where}
+            ORDER BY e.embedding <=> %s::vector
+            LIMIT %s""",
+        tuple(params),
+    )
+    return {"query": query.strip(), "top_k": top_k, "matches": len(rows),
+            "results": rows}
+
+
+# --------------------------------------------------------------------------
+# Writes — the capstone's "agent takes real actions" requirement
+# --------------------------------------------------------------------------
+
+def add_watchlist(entity_type: str, entity_ref: str, note: str | None = None,
+                  user_id: str = "default") -> dict:
+    """Track a driver, constructor or circuit. Idempotent."""
+    entity_type = str(entity_type).strip().lower()
+    if entity_type not in ("driver", "constructor", "circuit"):
+        raise ValueError("entity_type must be 'driver', 'constructor' or 'circuit'")
+    if not str(entity_ref).strip():
+        raise ValueError("entity_ref must be a non-empty string")
+
+    resolved = str(entity_ref).strip()
+    if entity_type == "driver":
+        # Resolve before storing so the watchlist holds a real driver rather
+        # than whatever the user typed.
+        resolved = resolve_driver(resolved)["driver_name"]
+
+    rows = schema.returning(
+        f"""INSERT INTO {schema.WATCHLIST} (user_id, entity_type, entity_ref, note)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, entity_type, entity_ref)
+            DO UPDATE SET note = COALESCE(EXCLUDED.note, {schema.WATCHLIST}.note)
+            RETURNING id, entity_type, entity_ref, note, added_at""",
+        (user_id, entity_type, resolved, note),
+    )
+    return {"written": True, "action": "add_to_watchlist", "row": rows[0]}
+
+
+def get_watchlist(user_id: str = "default") -> dict:
+    rows = schema.query(
+        f"""SELECT id, entity_type, entity_ref, note, added_at
+            FROM {schema.WATCHLIST} WHERE user_id = %s
+            ORDER BY added_at DESC""",
+        (user_id,),
+    )
+    return {"user_id": user_id, "count": len(rows), "items": rows}
+
+
+def log_prediction(season: int, round_or_name, prediction: str,
+                   confidence: str = "medium", rationale: str | None = None,
+                   user_id: str = "default") -> dict:
+    """Record a prediction against a specific race."""
+    if not str(prediction).strip():
+        raise ValueError("prediction must be a non-empty string")
+    confidence = str(confidence).strip().lower()
+    if confidence not in ("low", "medium", "high"):
+        raise ValueError("confidence must be 'low', 'medium' or 'high'")
+
+    race = resolve_race(season, round_or_name)
+    rows = schema.returning(
+        f"""INSERT INTO {schema.PREDICTIONS}
+                (user_id, season, round, prediction, confidence, rationale)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, season, round, prediction, confidence, rationale, created_at""",
+        (user_id, race["season"], race["round"], str(prediction).strip(),
+         confidence, rationale),
+    )
+    row = dict(rows[0])
+    row["race_name"] = race["race_name"]
+    return {"written": True, "action": "log_prediction", "row": row}
+
+
+def save_note(season: int, round_or_name, note: str,
+              user_id: str = "default") -> dict:
+    """Save a free-text analyst note against a race."""
+    if not str(note).strip():
+        raise ValueError("note must be a non-empty string")
+    race = resolve_race(season, round_or_name)
+    rows = schema.returning(
+        f"""INSERT INTO {schema.NOTES} (user_id, season, round, note)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, season, round, note, created_at""",
+        (user_id, race["season"], race["round"], str(note).strip()),
+    )
+    row = dict(rows[0])
+    row["race_name"] = race["race_name"]
+    return {"written": True, "action": "save_race_note", "row": row}
+
+
+def get_notes(season: int | None = None, round_: int | None = None,
+              user_id: str = "default", limit: int = 20) -> dict:
+    clauses, params = ["user_id = %s"], [user_id]
+    if season:
+        clauses.append("season = %s")
+        params.append(int(season))
+    if round_ is not None:
+        clauses.append("round = %s")
+        params.append(int(round_))
+    params.append(max(1, min(int(limit), MAX_RESULTS)))
+    rows = schema.query(
+        f"""SELECT n.id, n.season, n.round, r.race_name, n.note, n.created_at
+            FROM {schema.NOTES} n
+            LEFT JOIN {schema.RACES} r ON r.season = n.season AND r.round = n.round
+            WHERE {' AND '.join(clauses)}
+            ORDER BY n.created_at DESC LIMIT %s""",
+        tuple(params),
+    )
+    return {"count": len(rows), "notes": rows}
+
+
+def get_predictions(season: int | None = None, user_id: str = "default",
+                    limit: int = 20) -> dict:
+    clauses, params = ["p.user_id = %s"], [user_id]
+    if season:
+        clauses.append("p.season = %s")
+        params.append(int(season))
+    params.append(max(1, min(int(limit), MAX_RESULTS)))
+    rows = schema.query(
+        f"""SELECT p.id, p.season, p.round, r.race_name, p.prediction,
+                   p.confidence, p.rationale, p.created_at
+            FROM {schema.PREDICTIONS} p
+            LEFT JOIN {schema.RACES} r ON r.season = p.season AND r.round = p.round
+            WHERE {' AND '.join(clauses)}
+            ORDER BY p.created_at DESC LIMIT %s""",
+        tuple(params),
+    )
+    return {"count": len(rows), "predictions": rows}
