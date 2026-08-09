@@ -301,7 +301,13 @@
         </div>
       </div>
       <div class="starters">
-        {% for s in ["Why did Ferrari lose the 2024 Italian Grand Prix?",
+        {# Starters are questions with good answers in this data. An earlier
+           set included "Why did Ferrari lose the 2024 Italian Grand Prix?" as a
+           demonstration that the agent refuses a false premise - Leclerc won
+           that race. It does refuse it, but a suggested question is read as a
+           statement the page endorses, so it looked like the app believed
+           Ferrari lost. Keep the guardrail; do not advertise it as fact. #}
+        {% for s in ["Why did Verstappen win the 2024 São Paulo Grand Prix?",
                      "Was Monza 2024 actually a wet race?",
                      "Which 2024 races were decided by strategy?",
                      "Track Lando Norris for me"] %}
