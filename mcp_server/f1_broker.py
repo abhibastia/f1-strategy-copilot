@@ -298,7 +298,12 @@ def search_reports(query: str, top_k: int = 5, season: int | None = None,
     """Semantic search over race-report prose, joined to measured weather."""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
-    top_k = max(1, min(int(top_k), MAX_RESULTS))
+    # Floor of 3, not 1. A model asking for a single passage gets a coin flip:
+    # one run answered the Monza question correctly and the next hedged, because
+    # top_k=1 drew a passage from the wrong race. Retrieval quality should not
+    # depend on the model guessing a good k, so the floor is enforced here
+    # rather than left to the prompt.
+    top_k = max(3, min(int(top_k), MAX_RESULTS))
 
     vector = embedder.to_pgvector(embedder.embed_query(query.strip()))
     clauses, params = [], [vector]
@@ -329,6 +334,79 @@ def search_reports(query: str, top_k: int = 5, season: int | None = None,
     )
     return {"query": query.strip(), "top_k": top_k, "matches": len(rows),
             "results": rows}
+
+
+def race_strategy(season: int, round_or_name) -> dict:
+    """Pit stops and reconstructed stints for one race, per driver.
+
+    This is what separates "who won" from "how they won". A driver on one stint
+    while a rival ran four means the result was decided in the pit lane.
+    """
+    race = resolve_race(season, round_or_name)
+    drivers = schema.query(f"""
+        SELECT s.driver_id,
+               max(p.driver_name)                       AS driver_name,
+               max(p.constructor_name_as_of_race)       AS constructor,
+               max(p.finish_position)                   AS finish_position,
+               max(p.grid_position)                     AS grid_position,
+               count(*)                                 AS stints,
+               count(*) - 1                             AS stops
+        FROM {schema.STINTS} s
+        LEFT JOIN {DRIVERS} p
+               ON p.season = s.season AND p.round = s.round AND p.driver_id = s.driver_id
+        WHERE s.season = %s AND s.round = %s
+        GROUP BY s.driver_id
+        ORDER BY min(COALESCE(p.finish_position, 99))""",
+        (race["season"], race["round"]))
+
+    stops = schema.query(f"""
+        SELECT driver_id, stop_number, lap, duration_s
+        FROM {schema.PIT_STOPS}
+        WHERE season = %s AND round = %s AND duration_s IS NOT NULL
+        ORDER BY duration_s DESC LIMIT 5""",
+        (race["season"], race["round"]))
+
+    counts = [int(d["stints"]) for d in drivers if d["stints"]]
+    return {
+        "resolved_race": race["race_name"],
+        "season": race["season"], "round": race["round"],
+        "drivers_analysed": len(drivers),
+        "stint_spread": (f"{min(counts)}-{max(counts)}" if counts else None),
+        "most_common_strategy": (f"{max(set(counts), key=counts.count)} stint(s)"
+                                 if counts else None),
+        "slowest_stops": stops,
+        "by_driver": drivers,
+        "note": "Stints are derived from pit-stop laps. Tyre compounds are not "
+                "available from this data source - the race report's 'Tyre "
+                "choices' section covers those.",
+    }
+
+
+def strategy_spread(season: int, limit: int = 8) -> dict:
+    """Races where teams disagreed most about strategy.
+
+    Ranked by the gap between the fewest and most stints any driver ran. A wide
+    spread means the field genuinely split on approach, which is where the
+    interesting decisions are - far better than ranking by rainfall.
+    """
+    limit = max(1, min(int(limit), MAX_RESULTS))
+    rows = schema.query(f"""
+        SELECT s.season, s.round, r.race_name, w.was_wet, w.precipitation_mm,
+               min(t.stints) AS min_stints, max(t.stints) AS max_stints,
+               round(avg(t.stints)::numeric, 2) AS avg_stints,
+               max(t.stints) - min(t.stints) AS spread
+        FROM (SELECT season, round, driver_id, count(*) AS stints
+                FROM {schema.STINTS} GROUP BY 1,2,3) t
+        JOIN {schema.STINTS} s
+          ON s.season = t.season AND s.round = t.round AND s.driver_id = t.driver_id
+        JOIN {schema.RACES} r ON r.season = s.season AND r.round = s.round
+        LEFT JOIN {schema.WEATHER} w ON w.season = s.season AND w.round = s.round
+        WHERE s.season = %s
+        GROUP BY s.season, s.round, r.race_name, w.was_wet, w.precipitation_mm
+        ORDER BY spread DESC, s.round LIMIT %s""", (int(season), limit))
+    return {"season": int(season), "races": rows,
+            "note": "Spread is the gap between the fewest and most stints any "
+                    "driver ran. A wide spread means the field split on strategy."}
 
 
 # --------------------------------------------------------------------------

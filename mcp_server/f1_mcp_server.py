@@ -211,6 +211,53 @@ def search_race_reports(query: str, top_k: int = 5,
 
 
 @mcp.tool
+def get_race_strategy(season: int, race: str) -> dict:
+    """
+    Get the pit-stop and stint strategy for one race, per driver.
+
+    This is what separates "who won" from "how they won". A driver running one
+    stint while a rival ran four means the result was decided in the pit lane.
+
+    Args:
+        season: Championship year.
+        race: Round number, race name, or circuit ("Monza", "Suzuka").
+
+    Returns:
+        A dict with resolved_race, stint_spread, most_common_strategy, the five
+        slowest stops, and per-driver stint and stop counts with finishing
+        position. Tyre compounds are not available from this data source - use
+        search_race_reports for the report's "Tyre choices" section.
+    """
+    try:
+        return f1_broker.race_strategy(season, race)
+    except Exception as exc:
+        return _error(exc, f"get_race_strategy({season}, {race!r})")
+
+
+@mcp.tool
+def find_strategy_races(season: int, limit: int = 8) -> dict:
+    """
+    Find races where teams disagreed most about strategy.
+
+    Ranked by the gap between the fewest and most stints any driver ran. A wide
+    spread means the field genuinely split on approach - a better way to find
+    interesting races than ranking by rainfall.
+
+    Args:
+        season: Championship year.
+        limit: Maximum races to return, 1-25.
+
+    Returns:
+        A dict with races ordered by stint spread, each carrying min/max/avg
+        stints and that race's measured rainfall.
+    """
+    try:
+        return f1_broker.strategy_spread(season, limit)
+    except Exception as exc:
+        return _error(exc, f"find_strategy_races({season})")
+
+
+@mcp.tool
 def get_watchlist() -> dict:
     """
     List the drivers, constructors and circuits currently being tracked.

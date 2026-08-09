@@ -51,6 +51,12 @@ TOOL USE
 - Call the most specific tool for the question. Do not call them all.
 - For "what happened in race X", use search_race_reports - the narrative is
   there, the results table is not a story.
+- For "why did X win/lose" or anything about pit stops, tyres or strategy, call
+  get_race_strategy AND search_race_reports. The numbers say what the strategy
+  WAS; the report says why it was chosen and whether it worked.
+- Ask search_race_reports for at least 5 passages. One or two is not enough to
+  find the sentence that answers a question, and a thin search is how you end
+  up saying "the report does not mention it" when it does.
 - For "was it wet", use get_race_weather. That is measurement, not opinion.
 - When a user asks you to track, predict, or note something, actually call the
   write tool. Then confirm what you saved, quoting the row you got back.
@@ -94,6 +100,13 @@ TOOLS = [
      {"query": ("string", "What to look for, in plain language"),
       "top_k": ("integer", "How many passages, 1-10"),
       "season": ("integer", "Restrict to one year")}, ["query"]),
+    ("get_race_strategy", "Pit stops and stints for one race, per driver - how a result was won.",
+     {"season": ("integer", "Championship year"),
+      "race": ("string", "Round number, race name or circuit, e.g. 'Suzuka'")},
+     ["season", "race"]),
+    ("find_strategy_races", "Races where teams disagreed most about strategy.",
+     {"season": ("integer", "Championship year"),
+      "limit": ("integer", "Max races, 1-25")}, ["season"]),
     ("get_watchlist", "List tracked drivers, constructors and circuits.", {}, []),
     ("get_predictions", "List previously logged predictions.",
      {"season": ("integer", "Restrict to one year")}, []),
@@ -128,6 +141,8 @@ DISPATCH = {
     "find_wet_races": lambda a: f1_broker.wet_races(a.get("season"), a.get("limit", 10)),
     "search_race_reports": lambda a: f1_broker.search_reports(
         a["query"], a.get("top_k", 5), a.get("season")),
+    "get_race_strategy": lambda a: f1_broker.race_strategy(a["season"], a["race"]),
+    "find_strategy_races": lambda a: f1_broker.strategy_spread(a["season"], a.get("limit", 8)),
     "get_watchlist": lambda a: f1_broker.get_watchlist(),
     "get_predictions": lambda a: f1_broker.get_predictions(a.get("season")),
     "get_race_notes": lambda a: f1_broker.get_notes(a.get("season")),
@@ -180,6 +195,8 @@ def _trim(name: str, result) -> dict:
              "text": (r.get("chunk_text") or "")[:700]}
             for r in out["results"]
         ]
+    if name == "get_race_strategy" and "by_driver" in out:
+        out["by_driver"] = out["by_driver"][:12]
     if name == "get_championship_standings" and "standings" in out:
         out["standings"] = out["standings"][:12]
     return out
