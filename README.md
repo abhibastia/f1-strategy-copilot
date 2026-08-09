@@ -14,6 +14,14 @@ tools both read and write.
 
 > **Apps auto-stop after 24 hours on Free Edition.** If a URL does not respond,
 > restart it: `databricks apps start <name> --profile <profile>`.
+>
+> **On the two names.** The Databricks app is called `mcp-f1-race-companion`,
+> from an earlier framing of this project as a race companion. Databricks app
+> names are immutable and baked into the URL, and recreating an app to rename it
+> is not worth the risk on a workspace where app creation has been unreliable.
+> Everything user-facing — the UI, the MCP server identity, the health
+> endpoints, the User-Agent strings — says **F1 Strategy Copilot**. The URL is
+> the one place the old name survives.
 
 ---
 

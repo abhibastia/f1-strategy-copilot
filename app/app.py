@@ -1,5 +1,5 @@
 """
-AI Formula 1 Race Companion — frontend.
+F1 Strategy Copilot — frontend.
 
 A Databricks App that presents the project's central finding and lets a user
 explore the corpus the agent reasons over: race results from the Spark pipeline,
@@ -26,7 +26,7 @@ from flask import Flask, jsonify, render_template, request
 import ui_data
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("f1-companion-ui")
+logger = logging.getLogger("f1-strategy-copilot-ui")
 
 app = Flask(__name__)
 
@@ -40,7 +40,7 @@ MCP_URL = os.environ.get(
 def healthz():
     """Liveness probe. Deliberately does not touch Lakebase, so a database
     problem cannot make the platform conclude the container is dead."""
-    return jsonify({"status": "ok", "app": "f1-race-companion-ui"})
+    return jsonify({"status": "ok", "app": "f1-strategy-copilot-ui"})
 
 
 @app.route("/")

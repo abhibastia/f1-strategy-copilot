@@ -1,5 +1,5 @@
 """
-AI Formula 1 Race Companion — MCP server.
+F1 Strategy Copilot — MCP server.
 
 Exposes F1 tools over MCP so a Databricks agent can call them:
 
@@ -10,6 +10,7 @@ Exposes F1 tools over MCP so a Databricks agent can call them:
   - get_race_weather
   - find_wet_races
   - search_race_reports
+  - get_race_strategy · find_strategy_races
   - get_watchlist / get_predictions / get_race_notes
 
 Every tool is thin: validate, call one `f1_broker` function, shape the result.
@@ -41,7 +42,7 @@ from f1_broker import UnknownDriverError, UnknownRaceError
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("f1-mcp-server")
 
-mcp = FastMCP("f1-race-companion")
+mcp = FastMCP("f1-strategy-copilot")
 
 
 def _error(exc: Exception, context: str) -> dict:
@@ -393,7 +394,7 @@ def save_race_note(season: int, race: str, note: str) -> dict:
 async def health(_request: Request) -> JSONResponse:
     """Liveness probe. Does not touch Lakebase, so a database problem cannot
     make the platform conclude the container is dead."""
-    return JSONResponse({"status": "ok", "server": "f1-race-companion"})
+    return JSONResponse({"status": "ok", "server": "f1-strategy-copilot"})
 
 
 @mcp.custom_route("/", methods=["GET"])
@@ -416,7 +417,7 @@ async def landing(request: Request) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>F1 Race Companion — MCP Server</title>
+<title>F1 Strategy Copilot — MCP Server</title>
 <style>
  :root {{ color-scheme: light dark; }}
  body {{ font:16px/1.6 system-ui,sans-serif; max-width:52rem; margin:3rem auto; padding:0 1.25rem; }}
@@ -426,7 +427,7 @@ async def landing(request: Request) -> HTMLResponse:
  td,th {{ text-align:left; padding:.45rem .5rem; border-bottom:1px solid rgba(128,128,128,.3); vertical-align:top; }}
  .box {{ padding:.7rem 1rem; border:1px solid rgba(128,128,128,.35); border-radius:.5rem; overflow-x:auto; }}
 </style></head><body>
-<h1>AI Formula 1 Race Companion <span class="ok">running</span></h1>
+<h1>F1 Strategy Copilot <span class="ok">running</span></h1>
 <p class="sub">MCP server over F1 results, race-report prose and measured race-day weather.</p>
 <h2>MCP endpoint</h2>
 <div class="box"><code>{endpoint}</code></div>

@@ -16,7 +16,7 @@ import requests
 
 logger = logging.getLogger("laps")
 BASE = "https://api.jolpi.ca/ergast/f1"
-UA = {"User-Agent": "f1-race-companion/1.0 (educational capstone)"}
+UA = {"User-Agent": "f1-strategy-copilot/1.0 (educational capstone)"}
 PAGE = 100
 DELAY = 0.35          # ~3/s, inside Jolpica's 4/s burst and 500/hr sustained
 MAX_RETRIES = 4

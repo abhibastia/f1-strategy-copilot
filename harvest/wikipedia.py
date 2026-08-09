@@ -37,7 +37,7 @@ API_URL = "https://en.wikipedia.org/w/api.php"
 # WIKI_USER_AGENT to point at your own contact.
 USER_AGENT = os.environ.get(
     "WIKI_USER_AGENT",
-    "f1-race-companion/1.0 (https://github.com/abhibastia/f1-race-companion) "
+    "f1-strategy-copilot/1.0 (https://github.com/abhibastia/f1-strategy-copilot) "
     "educational capstone; contact via GitHub issues",
 )
 
