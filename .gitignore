@@ -58,3 +58,6 @@ data/laps/
 .idea/
 .vscode/
 .DS_Store
+
+# Working notes, not part of the deliverable
+ACTION_PLAN.md
