@@ -8,6 +8,20 @@
 # VERIFICATION STATUS — stated because a deployed job definition is not
 # evidence that it ran.
 #
+#   HOW TO RUN THE CDF JOB (read this before using the bundle definition):
+#     The notebook succeeds when submitted directly and fails reproducibly when
+#     launched from this bundle - three attempts, same notebook, same
+#     parameters, same serverless config, dying with "Fatal Python error:
+#     Aborted". The difference appears to be the bundle files directory it runs
+#     from, not the code. Until that is understood, the verified command is:
+#
+#       databricks workspace import /Workspace/Users/<you>/f1-strategy-copilot/cdf_agent_analytics \
+#         --file notebooks/cdf_agent_analytics.py --language PYTHON --format SOURCE --overwrite
+#       databricks jobs submit --json @cdf_job.json
+#
+#     The bundle definition is kept because it is the right shape and is what a
+#     reviewer should read; it is not what produced the analytics table.
+#
 #   VERIFIED on Databricks:
 #     f1_ingest_incremental   (in pipeline/) — calls Jolpica, lands the Volume
 #     f1_medallion_pipeline   (in pipeline/) — Bronze -> Silver -> Gold

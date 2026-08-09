@@ -288,9 +288,10 @@ uses the same `f1_broker` functions so both surfaces run identical code.
 | `get_watchlist` · `get_predictions` · `get_race_notes` | |
 
 Writes mutate Lakebase and return the row they stored, so the agent confirms
-rather than asserts. Nine example transcripts — strategy, evidence, narrative,
-comparison, three writes, and a guardrail — are in
-[`RESULTS.md`](RESULTS.md) and [`data/demo_transcripts.json`](data/demo_transcripts.json).
+rather than asserts. Ten example transcripts — strategy, evidence, narrative, comparison, three
+writes and two guardrails — with the exact tool calls the agent made, are in
+[`RESULTS.md`](RESULTS.md). The raw JSON including the full tool results the
+model saw is in [`data/demo_transcripts.json`](data/demo_transcripts.json).
 
 **Guardrails.** Never state a figure not returned by a tool; follow the
 `suggestion` field on an error rather than guessing; report what a name resolved
