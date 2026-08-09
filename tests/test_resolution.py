@@ -113,3 +113,40 @@ class TestStrategy:
         assert result["races"], "no strategy data loaded"
         for race in result["races"]:
             assert race["max_stints"] >= race["min_stints"]
+
+
+class TestSeasonSchedule:
+    """The schedule tool exists so relative references - "the next race" - can be
+    turned into a round number. Without it the model passed the phrase through as
+    a race name and answered from nothing."""
+
+    def test_rounds_are_ordered_and_complete(self, broker):
+        result = broker.season_schedule(2024)
+        rounds = [r["round"] for r in result["schedule"]]
+        assert rounds == sorted(rounds), "schedule must be in race order"
+        assert rounds == list(range(1, len(rounds) + 1)), "no gaps in the season"
+
+    def test_next_race_after_sao_paulo_is_las_vegas(self, broker):
+        """The exact lookup the agent failed before this tool existed."""
+        schedule = broker.season_schedule(2024)["schedule"]
+        sao_paulo = next(r for r in schedule if "Paulo" in r["race_name"])
+        following = next(r for r in schedule if r["round"] == sao_paulo["round"] + 1)
+        assert "Las Vegas" in following["race_name"]
+        assert following["winner"] == "George Russell"
+
+    def test_unraced_rounds_have_no_winner(self, broker):
+        """A scheduled round is in the spine long before anyone drives it, so a
+        null winner is the only thing separating the two."""
+        result = broker.season_schedule(2026)
+        assert result["completed"] < result["rounds"], "2026 should be part-run"
+        for race in result["schedule"]:
+            if race["winner"] is None:
+                assert not broker._has_results(2026, race["round"])
+
+    def test_strategy_for_an_unraced_round_says_so(self, broker):
+        """Returning empty fields sent the model searching the report corpus for
+        a result that cannot exist, and it answered "not specified in the search
+        results" - a retrieval failure, not the truth."""
+        result = broker.race_strategy(2026, "Italian Grand Prix")
+        assert result.get("status") == "not_yet_raced"
+        assert "has not been raced yet" in result["message"]

@@ -212,6 +212,30 @@ def search_race_reports(query: str, top_k: int = 5,
 
 
 @mcp.tool
+def get_season_schedule(season: int) -> dict:
+    """
+    List every round of a season in order, with its winner and rainfall.
+
+    Use this to resolve a relative reference before calling a per-race tool.
+    "The next race", "the round before that" and "the following weekend" are not
+    race names and will not resolve - look the round number up here first, then
+    pass that number.
+
+    Args:
+        season: Championship year.
+
+    Returns:
+        A dict with rounds, completed, and a schedule list carrying round,
+        race_name, race_date, circuit, winner, precipitation_mm and conditions.
+        A round with a null winner has not been raced yet.
+    """
+    try:
+        return f1_broker.season_schedule(season)
+    except Exception as exc:
+        return _error(exc, f"get_season_schedule({season})")
+
+
+@mcp.tool
 def get_race_strategy(season: int, race: str) -> dict:
     """
     Get the pit-stop and stint strategy for one race, per driver.

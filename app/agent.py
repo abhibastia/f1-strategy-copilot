@@ -102,7 +102,16 @@ USE WHAT THE TOOLS GAVE YOU
 
 TOOL ARGUMENTS
 - `race` takes ONE race: a round number, a race name, or a circuit. There is no
-  "all". To look across a season use find_strategy_races or find_wet_races."""
+  "all". To look across a season use find_strategy_races or find_wet_races.
+- NEVER pass a relative phrase as `race`. "the next race", "the one before that"
+  and "the following round" are not race names and will not resolve. Call
+  get_season_schedule first, read the round number you need off it, then pass
+  that number. This applies to any follow-up that refers to an earlier answer.
+- If a per-race tool comes back empty, call get_season_schedule BEFORE searching.
+  A round with no winner has not been raced yet: say that plainly, say when it is
+  scheduled, and stop. Re-running the same search with reworded queries cannot
+  conjure a result that does not exist yet, and three near-identical searches
+  read as flailing."""
 
 
 # Tool schemas. Kept beside the dispatch table so a tool cannot be advertised
@@ -128,6 +137,10 @@ TOOLS = [
      {"query": ("string", "What to look for, in plain language"),
       "top_k": ("integer", "How many passages, 1-10"),
       "season": ("integer", "Restrict to one year")}, ["query"]),
+    ("get_season_schedule", "Every round of a season in order, with winner and rainfall. "
+     "Use this to turn a relative reference - 'the next race', 'the round before' - "
+     "into a round number before calling any per-race tool.",
+     {"season": ("integer", "Championship year, e.g. 2024")}, ["season"]),
     ("get_race_strategy", "Pit stops and stints for one race, per driver - how a result was won.",
      {"season": ("integer", "Championship year"),
       "race": ("string", "Round number, race name or circuit, e.g. 'Suzuka'")},
@@ -169,6 +182,7 @@ DISPATCH = {
     "find_wet_races": lambda a: f1_broker.wet_races(a.get("season"), a.get("limit", 10)),
     "search_race_reports": lambda a: f1_broker.search_reports(
         a["query"], a.get("top_k", 5), a.get("season")),
+    "get_season_schedule": lambda a: f1_broker.season_schedule(a["season"]),
     "get_race_strategy": lambda a: f1_broker.race_strategy(a["season"], a["race"]),
     "find_strategy_races": lambda a: f1_broker.strategy_spread(a["season"], a.get("limit", 8)),
     "get_watchlist": lambda a: f1_broker.get_watchlist(),

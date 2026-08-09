@@ -336,6 +336,47 @@ def search_reports(query: str, top_k: int = 5, season: int | None = None,
             "results": rows}
 
 
+def _has_results(season: int, rnd: int) -> bool:
+    """Whether a round has been run. A scheduled round exists in f1_races long
+    before anyone drives it, so presence in the spine proves nothing."""
+    return bool(schema.query(
+        f"SELECT 1 FROM {DRIVERS} WHERE season = %s AND round = %s LIMIT 1",
+        (int(season), int(rnd))))
+
+
+def season_schedule(season: int) -> dict:
+    """Every round of a season in order, with winner and measured rainfall.
+
+    Exists because the per-race tools all need a race identified up front, which
+    leaves relative references - "the next race", "the round before that" -
+    unanswerable. Without this the model had no way to turn "next race" into a
+    round number, and would either pass the phrase through as a race name or
+    guess. A cheap ordered list is what makes those follow-ups answerable.
+    """
+    rounds = schema.query(f"""
+        SELECT r.season, r.round, r.race_name, r.race_date, r.circuit_name,
+               r.circuit_country,
+               (SELECT p.driver_name FROM {DRIVERS} p
+                 WHERE p.season = r.season AND p.round = r.round
+                   AND p.finish_position = 1 LIMIT 1) AS winner,
+               w.precipitation_mm, w.conditions, w.was_wet
+        FROM {schema.RACES} r
+        LEFT JOIN {schema.WEATHER} w ON w.season = r.season AND w.round = r.round
+        WHERE r.season = %s
+        ORDER BY r.round""", (int(season),))
+    if not rounds:
+        raise ValueError(f"No races found for season {season}.")
+    # Flag which rounds have actually been run, so the model does not report a
+    # scheduled-but-unraced round as though it had a result.
+    completed = [r for r in rounds if r["winner"]]
+    return {
+        "season": int(season),
+        "rounds": len(rounds),
+        "completed": len(completed),
+        "schedule": rounds,
+    }
+
+
 def race_strategy(season: int, round_or_name) -> dict:
     """Pit stops and reconstructed stints for one race, per driver.
 
@@ -365,6 +406,24 @@ def race_strategy(season: int, round_or_name) -> dict:
         WHERE season = %s AND round = %s AND duration_s IS NOT NULL
         ORDER BY duration_s DESC LIMIT 5""",
         (race["season"], race["round"]))
+
+    if not drivers:
+        # Distinguish "we have no strategy data" from "this race has not been
+        # run". Returning empty fields for both left the model searching the
+        # report corpus for a result that cannot exist yet, and answering "not
+        # specified in the search results" - which reads as a retrieval failure
+        # rather than the truth, that the race is still in the future.
+        if not _has_results(race["season"], race["round"]):
+            return {
+                "resolved_race": race["race_name"],
+                "season": race["season"], "round": race["round"],
+                "status": "not_yet_raced",
+                "race_date": str(race.get("race_date")),
+                "message": (f"The {race['season']} {race['race_name']} is round "
+                            f"{race['round']}, scheduled for {race.get('race_date')}, "
+                            "and has not been raced yet. There is no result, no "
+                            "strategy and no race report. Do not search for one."),
+            }
 
     counts = [int(d["stints"]) for d in drivers if d["stints"]]
     return {
