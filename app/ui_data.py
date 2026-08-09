@@ -180,34 +180,47 @@ def agent_analytics() -> dict:
                count(DISTINCT session_id)                            AS sessions,
                max(called_at)                                        AS last_called_at
         FROM {schema.TOOL_CALLS}
+        WHERE tool_name NOT LIKE 'test\\_%%' ESCAPE '\\'
         GROUP BY tool_name ORDER BY call_count DESC""")
     totals = schema.query(f"""
         SELECT count(*) AS calls,
                count(*) FILTER (WHERE is_write)        AS writes,
                count(*) FILTER (WHERE outcome <> 'ok') AS errors,
                count(DISTINCT session_id)              AS sessions
-        FROM {schema.TOOL_CALLS}""")[0]
+        FROM {schema.TOOL_CALLS}
+        WHERE tool_name NOT LIKE 'test\\_%%' ESCAPE '\\'""")[0]
     return {"tools": tools, "totals": totals}
 
 
 def strategy_races(season: int, limit: int = 12) -> list[dict]:
     """Races ranked by how much strategy varied — where stop counts differed
     most between drivers, which is where the interesting decisions were."""
+    # Aggregate stints PER DRIVER, not stint_number.
+    #
+    # The first version used min/max(stint_number) - the ordinal within one
+    # driver's race - so the minimum was always 1 and every race displayed a
+    # spread of "1-5". A column identical on every row is worse than no column:
+    # it looks like data and carries none. What matters is how many stints each
+    # driver ran, so the counts are computed first and then compared.
     return schema.query("""
+        WITH per_driver AS (
+            SELECT season, round, driver_id, count(*) AS stints
+            FROM f1_stints GROUP BY 1, 2, 3
+        )
         SELECT s.season, s.round, r.race_name, w.was_wet, w.precipitation_mm,
-               count(DISTINCT s.driver_id)                       AS drivers,
-               round(avg(s.stint_number)::numeric, 2)            AS avg_stints,
-               max(s.stint_number)                               AS max_stints,
-               min(s.stint_number)                               AS min_stints,
+               count(*)                                          AS drivers,
+               round(avg(s.stints)::numeric, 2)                   AS avg_stints,
+               max(s.stints)                                      AS max_stints,
+               min(s.stints)                                      AS min_stints,
                (SELECT round(avg(p.duration_s)::numeric, 2) FROM f1_pit_stops p
                  WHERE p.season = s.season AND p.round = s.round
                    AND p.duration_s IS NOT NULL AND p.duration_s < 120) AS avg_stop_s
-        FROM f1_stints s
+        FROM per_driver s
         JOIN f1_races r ON r.season = s.season AND r.round = s.round
         LEFT JOIN f1_race_weather w ON w.season = s.season AND w.round = s.round
         WHERE s.season = %s
         GROUP BY 1,2,3,4,5
-        ORDER BY (max(s.stint_number) - min(s.stint_number)) DESC, s.round
+        ORDER BY (max(s.stints) - min(s.stints)) DESC, s.round
         LIMIT %s""", (int(season), int(limit)))
 
 
