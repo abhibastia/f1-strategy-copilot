@@ -1,0 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+requests>=2.31.0
+psycopg2-binary>=2.9.9
+databricks-sdk>=0.30.0
+sentence-transformers>=3.0.0

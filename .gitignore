@@ -1,0 +1,49 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[codz]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Environments -----------------------------------------------------------
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# --- Credentials — never commit ---------------------------------------------
+*.pem
+*.key
+*.p12
+.databrickscfg
+id_rsa*
+
+# --- Databricks CLI sync state ----------------------------------------------
+# `databricks sync` writes these next to a synced directory. Local build state,
+# not source: it records absolute workspace paths including the owner's email,
+# is regenerated on every sync, and would produce spurious diffs for anyone
+# deploying from their own workspace.
+.databricks/
+
+# --- Generated app payload --------------------------------------------------
+# scripts/build_app.sh copies f1lake/ into each app directory so a Databricks
+# App - which deploys from a single source path - can import it. f1lake/ at the
+# repo root is the single source of truth; these copies are build output and
+# committing them is how two copies silently drift apart.
+mcp_server/f1lake/
+app/f1lake/
+
+# --- Warehouse query cache --------------------------------------------------
+# Gold marts pulled from Delta by f1lake/seed_gold.py, cached so a failed seed
+# does not re-spend a warehouse query. Derived data - Delta is the source of
+# truth - and 1.8 MB of it. Regenerate with `seed_gold.py --refresh`.
+data/f1_driver_performance.json
+data/f1_championship.json
+
+# --- Editors / OS -----------------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
