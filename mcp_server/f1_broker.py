@@ -492,12 +492,16 @@ def save_note(season: int, round_or_name, note: str,
 
 def get_notes(season: int | None = None, round_: int | None = None,
               user_id: str = "default", limit: int = 20) -> dict:
-    clauses, params = ["user_id = %s"], [user_id]
+    # Every column must be table-qualified. Both f1_race_notes and f1_races
+    # carry `season` and `round`, so an unqualified filter raises
+    # "column reference is ambiguous" the moment a season is supplied - which
+    # is exactly what the agent does when asked for one race's notes.
+    clauses, params = ["n.user_id = %s"], [user_id]
     if season:
-        clauses.append("season = %s")
+        clauses.append("n.season = %s")
         params.append(int(season))
     if round_ is not None:
-        clauses.append("round = %s")
+        clauses.append("n.round = %s")
         params.append(int(round_))
     params.append(max(1, min(int(limit), MAX_RESULTS)))
     rows = schema.query(

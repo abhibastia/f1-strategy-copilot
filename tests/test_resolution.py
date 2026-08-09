@@ -1,0 +1,115 @@
+"""Name resolution against live data.
+
+Every case here was a real failure. None would have been caught by unit-testing
+the resolver with the strings a developer types - they only appeared when a
+language model chose the arguments, saying "Monza" and "Sao Paulo" where the
+data says "Italian Grand Prix" and "São Paulo".
+"""
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(scope="module")
+def broker(lakebase):
+    import f1_broker
+    return f1_broker
+
+
+class TestRaceResolution:
+    @pytest.mark.parametrize("query,expected_round", [
+        ("16", 16),                    # round number
+        ("Italian", 16),               # race name
+        ("Monza", 16),                 # CIRCUIT name - the agent's first guess
+        ("Silverstone", 12),
+        ("Interlagos", 21),
+    ])
+    def test_resolves_by_round_name_or_circuit(self, broker, query, expected_round):
+        assert broker.resolve_race(2024, query)["round"] == expected_round
+
+    @pytest.mark.parametrize("query", ["Sao Paulo", "São Paulo"])
+    def test_accents_fold_both_ways(self, broker, query):
+        """The data says "São Paulo"; nobody types the accent. Before unaccent,
+        the agent told the user the race did not exist."""
+        assert broker.resolve_race(2024, query)["round"] == 21
+
+    def test_unknown_race_raises_rather_than_guessing(self, broker):
+        with pytest.raises(broker.UnknownRaceError):
+            broker.resolve_race(2024, "Atlantis")
+
+    def test_resolution_is_reported_back(self, broker):
+        """A wrong match must be visible in the answer, not silent."""
+        assert "São Paulo" in broker.resolve_race(2024, "Sao Paulo")["race_name"]
+
+
+class TestDriverResolution:
+    @pytest.mark.parametrize("query,expected", [
+        ("Verstappen", "Max Verstappen"),
+        ("max_verstappen", "Max Verstappen"),
+        ("VER", "Max Verstappen"),
+        ("Perez", "Sergio Pérez"),          # accent folding
+        ("Hulkenberg", "Nico Hülkenberg"),  # umlaut folding
+    ])
+    def test_resolves_by_name_id_code_or_unaccented(self, broker, query, expected):
+        assert broker.resolve_driver(query, 2024)["driver_name"] == expected
+
+    def test_unknown_driver_raises(self, broker):
+        with pytest.raises(broker.UnknownDriverError):
+            broker.resolve_driver("Nobody At All", 2024)
+
+    def test_empty_input_raises(self, broker):
+        with pytest.raises(broker.UnknownDriverError):
+            broker.resolve_driver("", 2024)
+
+
+class TestRetrievalFloor:
+    def test_search_never_returns_a_single_passage(self, broker):
+        """A model asking for top_k=1 gets a coin flip. It once drew a passage
+        from the wrong race and hedged on a question it had previously answered
+        correctly, so the floor is enforced in the broker rather than left to
+        the prompt."""
+        result = broker.search_reports("wet race safety car", top_k=1)
+        assert len(result["results"]) >= 3
+
+    def test_search_is_capped(self, broker):
+        assert len(broker.search_reports("rain", top_k=999)["results"]) <= broker.MAX_RESULTS
+
+    def test_empty_query_rejected(self, broker):
+        with pytest.raises(ValueError):
+            broker.search_reports("   ")
+
+    def test_results_carry_weather_for_cross_checking(self, broker):
+        """Each hit must carry its race's measured weather, or narrative and
+        measurement cannot be checked against each other."""
+        for hit in broker.search_reports("rain", top_k=3)["results"]:
+            assert "was_wet" in hit and "precipitation_mm" in hit
+
+
+class TestWeatherHonesty:
+    def test_missing_observation_is_not_reported_as_dry(self, broker):
+        """"No data" and "no rain" are different claims. A future race has no
+        observation, and saying it was fair weather would be a lie."""
+        result = broker.race_weather(2026, 23)   # Abu Dhabi, not yet run
+        assert result.get("weather_available") is False
+        assert "no data" in result.get("note", "").lower()
+
+    def test_known_wet_race_is_flagged(self, broker):
+        result = broker.race_weather(2024, "Sao Paulo")
+        assert result["was_wet"] is True
+        assert result["precipitation_mm"] >= result["wet_threshold_mm"]
+
+
+class TestStrategy:
+    def test_stints_exceed_stops_by_one(self, broker):
+        """A driver with two stops ran three stints. Off-by-one here would
+        misreport every strategy."""
+        result = broker.race_strategy(2024, "Suzuka")
+        for driver in result["by_driver"]:
+            if driver["stops"] is not None and driver["stints"] is not None:
+                assert driver["stints"] == driver["stops"] + 1
+
+    def test_spread_reflects_real_disagreement(self, broker):
+        result = broker.strategy_spread(2024, limit=3)
+        assert result["races"], "no strategy data loaded"
+        for race in result["races"]:
+            assert race["max_stints"] >= race["min_stints"]
