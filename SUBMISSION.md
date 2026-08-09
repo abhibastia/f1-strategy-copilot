@@ -55,7 +55,7 @@ the reason it fails is the interesting part.
 | Tests | 64, all passing — `pytest tests/ -q` |
 | Jobs and pipelines | `databricks.yml` + `resources/f1_jobs.yml` — deploy with `databricks bundle deploy` |
 
-28 commits, 136 files, ~7,400 lines of Python.
+31 commits, 72 files, ~7,400 lines of Python.
 
 ## Screenshots
 
