@@ -1,0 +1,90 @@
+# F1 Strategy Copilot — submission
+
+**Repository** — https://github.com/abhibastia/f1-strategy-copilot
+**Strategy Copilot (UI)** — https://f1-companion-ui-7474646797973312.aws.databricksapps.com
+**MCP server** — https://mcp-f1-race-companion-7474646797973312.aws.databricksapps.com
+
+Both apps are deployed on Databricks Free Edition. Free Edition stops an app
+after 24 hours idle; if a URL does not respond, it needs a restart rather than a
+redeploy.
+
+---
+
+## The question this answers
+
+Why did a race turn out the way it did?
+
+Answering that needs three sources that do not agree with each other:
+
+- **Results** say *what* happened — who finished where, who retired.
+- **Pit stops and stints** say *how* it happened — a driver on one stint while a
+  rival ran four means the race was decided in the pit lane, not on track.
+- **Race reports** say *why* — and they are prose, so they are the only source
+  that can say a track was drying.
+
+The project's central finding is what happens when those three disagree.
+**Monza 2024 measured 19.1 mm of rain, the wettest race day of the season, and
+ran completely dry.** São Paulo measured less, 17.9 mm, and had a quarter of the
+field retire. Daily rainfall cannot tell overnight rain from race rain. The race
+report can. That is why the narrative is embedded and searchable rather than
+stored as a link — it is load-bearing, not decoration.
+
+Across 59 races, going from *any race* to *15 mm or more* moves the retirement
+rate only from 12.5% to 15.7%. The obvious feature barely predicts anything, and
+the reason it fails is the interesting part.
+
+## Where to start
+
+| If you want to see | Go to |
+|---|---|
+| The finding, and how it was reached | `DESIGN.md` |
+| The system, end to end | `README.md` — architecture diagram, setup, how to run each part |
+| The agent working, with tool calls | `RESULTS.md` — 10 transcripts, 12 tool calls, 3 database writes |
+| The Spark medallion pipeline | `pipeline/` — bronze → silver → gold, SCD Type 2 |
+| It running | The Strategy Copilot URL above, section 01 |
+
+## What is here
+
+| | |
+|---|---|
+| Spark medallion pipeline | `pipeline/` — Bronze, Silver, Gold; SCD Type 2 on constructor changes |
+| Unstructured data | 728 race-report sections, 1,065 embeddings, HNSW cosine index in Lakebase `pgvector` |
+| Agent + MCP server | 15 tools over streamable HTTP; 3 of them write |
+| Change Data Feed | `notebooks/cdf_agent_analytics.py` — agent tool calls → Delta with CDF → `table_changes()` → analytics |
+| Frontend | Flask app, 8 sections, chat with visible tool traces, light/dark/system theme |
+| Tests | 64, all passing — `pytest tests/ -q` |
+| Jobs and pipelines | `databricks.yml` + `resources/f1_jobs.yml` — deploy with `databricks bundle deploy` |
+
+28 commits, 136 files, ~7,400 lines of Python.
+
+## Screenshots
+
+In `screenshots/`, matching the numbered sections of the live app:
+
+| File | Shows |
+|---|---|
+| `01-overview-and-copilot.png` | Corpus stats, and the copilot answering with its tool call visible |
+| `02-wet-race-finding.png` | The central finding — rainfall as a weak predictor, across five thresholds |
+| `03-semantic-search.png` | Semantic search over race reports, each hit carrying that day's measured weather |
+| `04-season-explorer.png` | Every round of a season with winner, conditions and rainfall |
+| `06-strategy-divergence.png` | Races ranked by how much teams disagreed on strategy |
+
+## Honest notes
+
+Two things a reviewer should know rather than discover:
+
+**The CDF job runs, but not through the bundle.** The notebook in
+`notebooks/cdf_agent_analytics.py` produced the analytics table, submitted via
+`jobs submit` (`cdf_job.json`). The identical notebook run through the bundle job
+definition fails reproducibly with `Fatal Python error: Aborted`, and I could not
+find the cause. The bundle definition is left in place with that caveat written
+into `resources/f1_jobs.yml`, because a job definition that looks correct and was
+never the thing that ran is worse than one with a documented problem.
+
+**Lakebase uses a native Postgres role with a static password**, held as a
+base64-encoded URL in the Databricks secret scope `database`, key `lakebase-url`.
+Databricks also offers short-lived OAuth database credentials, which are the
+better posture; they expire after an hour and would need refresh logic in a
+long-running app. The trade-off is real and the password does not rotate.
+
+No credential appears anywhere in the repository or in any commit.
