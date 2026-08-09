@@ -1,230 +1,220 @@
-# AI Formula 1 Race Companion — Design
+# AI Formula 1 Race Strategy Copilot — Design
 
-## 1. What this is
+## 1. The problem
 
-An AI companion over Formula 1. A user asks questions in plain language — *"how
-wet was the 2024 São Paulo Grand Prix?"*, *"compare Ferrari and McLaren's 2024
-form"*, *"which races were decided by rain?"* — and an agent answers from three
-sources that agree with each other: race results from a Spark pipeline, the
-narrative of race reports, and **measured** race-day weather. It also takes
-real actions: saving predictions, tracking drivers, recording notes.
+After a Grand Prix, the interesting question is never *what* happened — the
+results table answers that in one line. It is **why**.
 
-The thing that makes it more than a query interface is that the three sources
-are joinable. A race report calls something "a chaotic wet race"; the weather
-archive says 17.9 mm fell at Interlagos that day. One is an adjective, the other
-is a measurement, and having both lets the agent answer *"which races were
-actually wet?"* without trusting an encyclopaedia's choice of words.
+*Why did Ferrari lose a race they led? Was McLaren's undercut the right call, or
+did the safety car just fall their way? Which races were actually decided by
+strategy rather than pace?*
 
-## 2. Capstone requirements
+Answering that today means holding three incompatible sources in your head at
+once:
 
-| # | Requirement | Where it lives |
+| Source | Answers | Cannot answer |
 |---|---|---|
-| 1 | A data pipeline in Spark | `formula1-capstone-project` — Bronze → Silver → Gold, SCD-2 dims, expectations |
-| 2 | Integration with ≥1 third-party API | **Three**: Jolpica-F1, Wikimedia, Open-Meteo archive |
-| 3 | Processing of unstructured data | Race reports chunked, embedded, searched semantically in Lakebase `pgvector` |
-| 4 | A Databricks App with a frontend | MCP server app + Flask frontend app |
-| 5 | An AI agent with read **and write** tools | 12 MCP tools — 9 read, 3 write |
+| Results & timing tables | *what* happened, precisely | *why* it happened |
+| Race report prose | *why*, in expert language | anything numeric or comparable |
+| Weather records | what the conditions were | when, within the race, they mattered |
 
-There is **no Change Data Feed requirement**. `CDF` and `Change Data Feed`
-appear nowhere in the capstone README; an earlier plan treated it as a sixth
-mandatory component. Building one would have been unpaid scope.
+Nobody joins them. A results API will not tell you a stop was slow *because* the
+front-left stuck. A race report will not tell you the second stint ran 0.4 s/lap
+slower. A weather archive reports a daily total and cannot tell you the track was
+dry when the race actually started.
 
-## 3. Architecture
+**This project joins all three on `(season, round)` and puts an agent in front of
+them**, so a question that needs evidence from all three gets one grounded answer.
+
+## 2. Who it is for
+
+**The post-race analyst** — journalist, team-side analyst, or a serious fan
+writing about the sport. They have a specific race and a specific suspicion, and
+they need evidence for or against it, fast.
+
+Not a daily tool. Neither is a trip planner. What matters is whether one session
+does real work, and "explain this race with evidence" is an hour of manual
+cross-referencing compressed into a question.
+
+## 3. What it does
+
+- **Explains outcomes** — combines finishing data, pit-stop timing, stint pace
+  and the race report's own account.
+- **Compares** drivers and constructors over a season or at one circuit.
+- **Investigates strategy** — undercut and overcut evidence, stop counts, who
+  gambled on a safety car and whether it paid.
+- **Checks conditions honestly** — measured rainfall alongside what the report
+  says about the track *during* the race, because those disagree more often than
+  you would expect.
+- **Records the work** — saves an analysis, tracks a driver or team, logs what
+  you expect next time at this circuit.
+
+## 4. The finding that shaped the design
+
+The obvious question — *does rain cause chaos?* — has a boring answer at first
+glance. Across 59 races, going from any race to ≥15 mm of rain moves the
+retirement rate only from **12.5% to 15.7%**.
+
+The individual races say something far more interesting:
+
+| Race | Rainfall | Retired | What the report says |
+|---|---|---|---|
+| 2024 Italian (Monza) | **19.1 mm** | 5.0% | *"a greater chance of rain than initially forecast"* |
+| 2025 Japanese | 16.9 mm | 0.0% | — |
+| 2024 São Paulo | 17.9 mm | 25.0% | *"held in rainy conditions on a wet track"* |
+| 2025 Australian | 17.7 mm | 30.0% | *"intermediate"* tyres throughout |
+
+The wettest race on record was among the calmest. The archive reports a **daily
+total** and cannot distinguish rain that fell overnight from rain that fell
+during the race. Semantic search surfaces the Miami report saying it outright:
+*"Although rain had fallen earlier on Sunday, the track was dry by the time the
+race began."*
+
+**This is why the unstructured layer is load-bearing rather than decorative.**
+Delete the embeddings and the product cannot answer its own core question.
+Causation lives in the prose; the numbers alone will mislead you.
+
+## 5. Architecture
 
 ```mermaid
 flowchart TB
     subgraph SRC["Third-party APIs"]
-        J["Jolpica-F1<br/>results, standings"]
+        J["Jolpica-F1<br/>results · qualifying · standings<br/>pit stops · lap times"]
         W["Wikimedia<br/>race reports"]
         O["Open-Meteo archive<br/>ERA5 observations"]
     end
 
-    J --> LAND["UC Volume<br/>raw JSON landing"]
-    LAND --> PIPE["Spark medallion pipeline<br/>Bronze → Silver → Gold"]
-    PIPE --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression<br/>dim_race")]
+    J --> LAND["UC Volume<br/>raw JSON"] --> PIPE["Spark medallion<br/>Bronze → Silver → Gold"]
+    PIPE --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression")]
 
-    GOLD -- "seeded once<br/>2 warehouse queries" --> LB
-    W --> HARV["local harvest<br/>section + chunk"]
+    GOLD -- "seeded once" --> LB
+    W --> HARV["local harvest<br/>section · chunk · embed"] --> LB
     O --> HARV
-    HARV -- "embedded locally<br/>384-dim" --> LB
 
-    LB[("Lakebase Postgres<br/>documents · embeddings · weather<br/>watchlist · predictions · notes")]
+    LB[("Lakebase Postgres<br/>reference · embeddings · weather<br/>stints · watchlist · notes · predictions")]
 
-    LB --> MCP["Databricks App<br/>MCP server — 12 tools"]
-    MCP --> AGENT["Databricks agent<br/>Unity AI Gateway"]
-    LB --> UI["Databricks App<br/>Flask frontend"]
-    AGENT -- "writes" --> LB
+    LB --> MCP["App 1 — MCP server<br/>tools for external agents"]
+    LB --> UI["App 2 — Strategy Copilot<br/>chat + analysis views"]
+    UI -- "tool calls" --> LB
+    UI -- "logged" --> CDF[("Lakebase<br/>agent_tool_calls<br/>CDF source")]
+    CDF -- "Change Data Feed" --> DELTA[("Delta<br/>agent_activity_analytics")]
+    DELTA --> UI
 ```
 
-`dim_race` is the spine. It already carries `wikipedia_url` and
-`circuit_lat`/`circuit_long` for all 71 races, which is why the unstructured and
-weather tracks need neither a search step nor a geocoding step — both are
-addressed directly from data the pipeline already produced.
-
-## 4. The two-store split
+## 6. The two-store split
 
 | | Delta (analytical) | Lakebase (operational) |
 |---|---|---|
-| Holds | Bronze/Silver/Gold marts | Serving copies, embeddings, user writes |
-| Written by | Spark pipeline | Local loaders, and the agent |
-| Read by | The seeding step, once | Every agent turn, both apps |
-| Cost per read | SQL warehouse compute | None |
+| Holds | Bronze/Silver/Gold marts, agent analytics | Serving copies, embeddings, stints, user writes |
+| Written by | Spark pipeline, CDF materialisation | Local loaders, the agent |
+| Read per agent turn | never | always |
+| Compute cost | one-time seed | none |
 
-**Why not query Delta from the agent?** Free Edition's daily compute quota is
-unrecoverable until the next day. An agent that spends a warehouse query per
-question is an agent that stops working mid-demo. Seeding the Gold marts into
-Postgres once costs two queries total; every read after that is free.
+Free Edition's daily compute quota is unrecoverable until the next day. An agent
+that spends a warehouse query per question is an agent that dies mid-demo, so
+Gold is seeded into Postgres once — **two warehouse queries total** — and every
+read thereafter is free.
 
-Delta stays the source of truth. The Lakebase copies are recreated on each seed
-rather than migrated, because a stale column left behind by an earlier mart
-shape would be a lie rather than history.
+## 7. Change Data Feed loop
 
-## 5. The shared key
+Every agent tool call is recorded in Lakebase. Change Data Feed carries those
+changes into a Delta analytics table, and the app reads it back to show which
+tools get used, how often writes happen, and how long calls take.
 
-Every table in Lakebase carries `(season, round)` — the same key
-`f1.silver.dim_race` uses.
+This closes the loop the rubric asks for: **operational writes → CDF → Delta
+analytics → surfaced in the app.** It is also genuinely useful — it is the only
+way to see what the agent is actually doing rather than what it claims.
 
-That is the whole integration. It means a semantic hit in a race report can
-pivot straight into that race's results and its rainfall, and it is why
-`search_race_reports` can return `was_wet` and `precipitation_mm` alongside each
-passage without any extra plumbing. Two data tracks with a shared key are one
-queryable thing; without it they would be two disconnected stores that happen to
-be about the same sport.
-
-## 6. Data model
+## 8. Data model
 
 ```
-f1_races               the spine: season, round, date, circuit, lat/lon, wiki url
-f1_documents           race-report sections, one row per (season, round, section)
-f1_embeddings          chunk-level, VECTOR(384), HNSW vector_cosine_ops
-f1_race_weather        measured race-day observations, one row per (season, round)
-f1_driver_performance  seeded from Delta Gold
-f1_championship        seeded from Delta Gold
+-- reference and analysis
+f1_races                 season, round, date, circuit, lat/lon, wikipedia url
+f1_driver_performance    seeded from Delta Gold
+f1_championship          seeded from Delta Gold
+f1_race_weather          measured race-day observations
+f1_pit_stops             per-driver stop lap, time of day, duration
+f1_stints                reconstructed from stops: stint number, laps, pace
+f1_documents             race-report sections
+f1_embeddings            chunk-level, VECTOR(384), HNSW vector_cosine_ops
 
-f1_watchlist           tracked drivers/constructors/circuits   ← agent WRITE
-f1_predictions         pre-race predictions with rationale     ← agent WRITE
-f1_race_notes          free-text analyst notes                 ← agent WRITE
+-- the agent writes here
+f1_watchlist             tracked drivers / constructors / circuits
+f1_predictions           what the analyst expects next time
+f1_race_notes            saved analysis
+agent_tool_calls         every call — CDF source for the analytics loop
 ```
 
-## 7. Design decisions
+Everything carries `(season, round)`, the key `f1.silver.dim_race` already uses.
+That is the whole integration: a semantic hit in a race report pivots straight
+into that race's stops, stints, weather and results.
 
-Each of these was expensive to reverse, so each was chosen from evidence.
+## 9. Design decisions
 
-### 7.1 Lakebase `pgvector`, not Databricks Vector Search
+**Lakebase pgvector, not Databricks Vector Search.** Free Edition allows one AI
+Search endpoint with one search unit and no Direct Vector Access. A pgvector path
+was already proven end-to-end here. HNSW over IVFFlat, because IVFFlat picks
+centroids at build time and needs representative rows to already exist —
+wrong for a table that starts empty. `vector_cosine_ops` matches the `<=>`
+operator; a different opclass is *silently ignored* and degrades to a full scan.
 
-Free Edition allows one AI Search endpoint with one search unit, and Direct
-Vector Access is unsupported. A pgvector path was already proven end-to-end on
-this same Lakebase instance. Reuse beat novelty.
+**Embeddings computed locally.** A Free Edition serverless notebook is
+memory-killed loading `sentence-transformers`/`torch`, dying before any embedding
+starts. Local embedding costs no Databricks compute.
 
-HNSW over IVFFlat: IVFFlat picks its centroids at build time and needs
-representative rows to already exist, which is wrong for a table that starts
-empty and grows. The index uses `vector_cosine_ops` to match the `<=>` operator
-used at query time — an index built with a different opclass is *silently
-ignored* and degrades to a full scan with no error.
+**The agent runs in-process in the frontend, and over MCP for external clients.**
+Both call the same `f1_broker` functions, so a bug is a bug in both rather than a
+divergence between them. Calling the MCP app from the UI app would mean a second
+OAuth hop to reach functions already importable.
 
-### 7.2 Embeddings computed locally
+**Thin tools, one broker.** No SQL and no HTTP appears inside any tool function.
+The F1 logic is testable with a plain Python call — no agent, no MCP client, no
+deployed app.
 
-A Free Edition serverless notebook is memory-killed while loading
-`sentence-transformers`/`torch`, dying before any embedding work starts.
-Embedding on the laptop and writing vectors over the network costs zero
-Databricks compute. Vectors are bound in pgvector's text form and cast with
-`%s::vector` inside the `execute_values` row template, so the column holds real
-vectors on insert — the common alternative writes `double precision[]` and needs
-a follow-up `UPDATE … ::vector` whose omission makes search return nothing at
-all, with no error.
+**Resolution is returned, never assumed.** Users say "Verstappen" and "Monza";
+the data says `max_verstappen` and `Italian Grand Prix`. Every read reports what
+it matched. An *ambiguous* name raises rather than picking the first row.
 
-### 7.3 Wikipedia as the corpus, addressed not searched
+## 10. Explicitly out of scope
 
-`dim_race.wikipedia_url` is populated for 71 of 71 races, so the corpus is
-pre-addressed: no title construction, no disambiguation between "2024 Brazilian
-Grand Prix" and "Brazilian Grand Prix". Articles are split by section so a
-retrieval hit can cite *"from the Race report section"*; navigation and
-standings sections are dropped because in plain-text form they embed as walls of
-digits that pollute every result.
+Stated because a reviewer will look for them:
 
-### 7.4 Weather as measurement, with an explicit threshold
+- **Tyre compounds.** Jolpica inherits Ergast's schema, which has no compound
+  field — that is FastF1/OpenF1 territory. Tyre strategy is therefore answered
+  from the race report's own "Tyre choices" section, not from a table.
+- **Pace-degradation simulation.** A real "what if they had two-stopped" model
+  needs a degradation curve this data cannot support. What is offered instead is
+  **counterfactual comparison from observed data** — what actually happened to
+  drivers who took the other option — which is a weaker claim with real evidence
+  behind it.
+- **Live timing.** Everything here is post-race.
 
-Observations come from Open-Meteo's ERA5 archive at the circuit's coordinates on
-the race date. A race is `was_wet` at **1.0 mm** — roughly where rain stops
-being a passing shower and starts affecting tyre choice and grip. The threshold
-is a named constant, stored on every row and quoted in the tool docstring, so
-the agent can explain a claim rather than assert it.
-
-The archive trails real time by about five days. Recent races are **skipped, not
-recorded as zero rainfall** — "no data" and "no rain" are different claims, and
-conflating them would quietly corrupt every wet-race query.
-
-### 7.5 Thin tools, one broker
-
-No `psycopg2` call and no HTTP call appears inside any `@mcp.tool` function.
-Every query and every write lives in `f1_broker.py`; the tools validate, call
-one broker function, and shape the result. The F1 logic is therefore testable
-with a plain Python call — no agent, no MCP client, no deployed app.
-
-### 7.6 Resolution is returned, never assumed
-
-Users say "Verstappen"; the data says `driver_id='max_verstappen'`. Every read
-returns what it actually matched, so a wrong match is visible in the answer
-rather than silently wrong. An **ambiguous** name raises instead of picking the
-first row — "Schumacher" should produce a question, not a guess.
-
-## 8. Failure modes and how they are handled
+## 11. Known failure modes
 
 | Failure | Handling |
 |---|---|
-| Unknown driver | `unknown_driver` with candidates listed; the agent asks which |
-| Unknown race | `unknown_race`; the agent asks for a round or name |
-| No weather observation | `weather_available: false` with a note that this means **no data**, not fair weather |
-| Upstream API throttling | Retry-After honoured, exponential backoff with jitter, resumable harvest |
+| Unknown driver / race | Structured error naming candidates; the agent asks |
+| No weather observation | `weather_available: false` — means **no data**, never "fair weather" |
+| Upstream throttling | Retry-After honoured, exponential backoff, resumable harvest |
 | Bad upstream URL | Recorded in a failures file, not worked around |
-| Duplicate section headings | Repeats suffixed, both bodies kept |
+| Agent loops on tools | Hard turn cap, then answers from what it has |
 
-Tools return structured error dicts rather than raising, each with a
-`suggestion` field naming the remedy. A tool failure becomes a clarifying
-question instead of an invented result.
+## 12. Bugs found during the build
 
-## 9. Bugs found during the build
+Each changed the design.
 
-Recorded because each one changed the design.
+**Writes silently rolled back.** `INSERT … RETURNING` through the read helper
+returned a real row with a real id — so a write looked successful — but never
+committed. An agent would tell a user "saved" and the database would disagree.
+Only read-back-after-write catches this.
 
-**Writes silently rolled back.** `INSERT … RETURNING` run through the read
-helper returned a real row with a real id — so a write looked entirely
-successful — but the helper never committed, and closing the connection rolled
-it back. An agent would have told a user "saved" and the database would have
-disagreed. Only a read-back-after-write test catches this; trusting the write's
-own return value does not. Writes now go through a separate `returning()` helper
-that commits, documented as not interchangeable.
+**`databricks sync` honours `.gitignore`.** Ignoring the generated app payload
+silently stripped it from the deployment; the app would have failed on import.
+There is no way to have the payload deployed but untracked, so it is committed
+and regenerated by a build script.
 
-**Wikipedia throttled at exactly ten requests.** A 0.2s delay and a generic
-User-Agent, both wrong under Wikipedia's policy: 49 of 59 articles failed with
-HTTP 429. Fixed with a compliant agent string, Retry-After handling, backoff
-with jitter, and resume support.
+**Wikipedia throttled at exactly ten requests.** A 0.2 s delay and a generic
+User-Agent, both wrong under Wikipedia's policy — 49 of 59 articles failed.
 
-**Duplicate document ids.** The 2025 Las Vegas article repeats the heading
-"Race". Since a document id derives from `(season, round, section)`, that
-produced two rows with the same id in one batch, which Postgres rejects outright
-with *"ON CONFLICT DO UPDATE command cannot affect row a second time"*.
-
-**A wrong key guess costs a warehouse query.** The seeding step originally
-assumed `driver_ref`; the marts use `driver_id`. Keys are now auto-detected from
-candidates, validated for existence *and* uniqueness, and query results are
-cached so a failure after a successful query does not pay for it twice.
-
-## 10. Limitations
-
-- **Weather is daily, not session-level.** ERA5 gives one observation per day;
-  a race that started dry and ended wet reads as its daily total. Hourly data
-  would fix this and is the obvious next step.
-- **One upstream URL is wrong.** Jolpica gives the 2026 Barcelona GP a
-  `wikipedia_url` of `2026_Barcelona-Catalunya`, which does not exist — 58 of 59
-  reports harvested. Recorded rather than patched around.
-- **Wikipedia is not authoritative.** It is a good narrative source and a poor
-  record of fact; every number the agent reports comes from the pipeline or the
-  weather archive, never from the prose.
-- **Predictions are not scored.** They are stored with a rationale but never
-  resolved against the actual result. Closing that loop is the most interesting
-  extension.
-- **Single user.** Every write is keyed `user_id='default'`. The column exists
-  so multi-user is a change of value, not of schema.
-- **No automated tests.** Verification was done by calling every tool through a
-  real MCP client and reading results back out of Lakebase.
+**Circuit names did not resolve.** People say "Monza"; the resolver matched only
+`race_name`, so the agent burned three extra tool calls retrying.
