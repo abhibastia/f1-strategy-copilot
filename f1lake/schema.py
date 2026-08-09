@@ -39,6 +39,9 @@ RACES = "f1_races"
 WATCHLIST = "f1_watchlist"
 PREDICTIONS = "f1_predictions"
 NOTES = "f1_race_notes"
+TOOL_CALLS = "agent_tool_calls"
+PIT_STOPS = "f1_pit_stops"
+STINTS = "f1_stints"
 
 _cached_url: str | None = None
 
@@ -97,6 +100,40 @@ def returning(sql: str, params: tuple | dict | None = None) -> list[dict]:
             rows = cur.fetchall()
             conn.commit()
             return rows
+
+
+def log_tool_call(tool_name: str, arguments: dict, outcome: str,
+                  is_write: bool = False, summary: str | None = None,
+                  duration_ms: int | None = None,
+                  session_id: str | None = None) -> None:
+    """Record one agent tool call. Never raises.
+
+    This is the source of the Change Data Feed loop: rows land here, CDF carries
+    them into a Delta analytics table, and the app reads that back to show what
+    the agent actually did.
+
+    Telemetry must never break the thing it observes. If this insert fails the
+    tool call has already succeeded, and an agent that cannot answer because a
+    logging write failed is strictly worse than one with a gap in its logs.
+    """
+    import json as _json
+    try:
+        with connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {TOOL_CALLS}
+                        (session_id, tool_name, is_write, arguments, outcome,
+                         summary, duration_ms)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (session_id, tool_name, is_write,
+                     _json.dumps(arguments, default=str), outcome,
+                     summary, duration_ms),
+                )
+                conn.commit()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("schema").warning(
+            "tool-call logging failed; the tool itself was unaffected", exc_info=True)
 
 
 def execute(sql: str, params: tuple | dict | None = None) -> int:
@@ -230,6 +267,57 @@ DDL = [
     )
     """,
     f"CREATE INDEX IF NOT EXISTS idx_{NOTES}_race ON {NOTES} (season, round)",
+
+    # --- strategy: pit stops and reconstructed stints -------------------------
+    f"""
+    CREATE TABLE IF NOT EXISTS {PIT_STOPS} (
+        season      INT NOT NULL,
+        round       INT NOT NULL,
+        driver_id   TEXT NOT NULL,
+        stop_number INT NOT NULL,
+        lap         INT NOT NULL,
+        time_of_day TEXT,
+        duration_s  DOUBLE PRECISION,
+        PRIMARY KEY (season, round, driver_id, stop_number)
+    )
+    """,
+    f"CREATE INDEX IF NOT EXISTS idx_{PIT_STOPS}_race ON {PIT_STOPS} (season, round)",
+
+    f"""
+    CREATE TABLE IF NOT EXISTS {STINTS} (
+        season       INT NOT NULL,
+        round        INT NOT NULL,
+        driver_id    TEXT NOT NULL,
+        stint_number INT NOT NULL,
+        start_lap    INT NOT NULL,
+        end_lap      INT,
+        laps         INT,
+        entry_reason TEXT,
+        exit_reason  TEXT,
+        PRIMARY KEY (season, round, driver_id, stint_number)
+    )
+    """,
+    f"CREATE INDEX IF NOT EXISTS idx_{STINTS}_race ON {STINTS} (season, round)",
+
+    # --- agent telemetry: the CDF source -------------------------------------
+    # Every tool call the agent makes lands here. Change Data Feed carries these
+    # rows into a Delta analytics table (see notebooks/cdf_agent_analytics.py),
+    # which is what lets the app show what the agent actually did rather than
+    # what it claimed to do.
+    f"""
+    CREATE TABLE IF NOT EXISTS {TOOL_CALLS} (
+        id          BIGSERIAL PRIMARY KEY,
+        called_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        session_id  TEXT,
+        tool_name   TEXT NOT NULL,
+        is_write    BOOLEAN NOT NULL DEFAULT false,
+        arguments   JSONB NOT NULL,
+        outcome     TEXT NOT NULL,
+        summary     TEXT,
+        duration_ms INT
+    )
+    """,
+    f"CREATE INDEX IF NOT EXISTS idx_{TOOL_CALLS}_called_at ON {TOOL_CALLS} (called_at DESC)",
 ]
 
 
