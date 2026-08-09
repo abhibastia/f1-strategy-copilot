@@ -114,7 +114,10 @@
   .hit-head .s { color:var(--dim); font-size:.8rem; }
   .sim { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent);
          font-weight:600; font-size:.85rem; }
-  .hit p { margin:0; color:var(--muted); font-size:.9rem; }
+  .hit p { margin:0 0 .45rem; color:var(--muted); font-size:.9rem; }
+  .src { color:var(--accent); font-size:.83rem; font-weight:600;
+         text-decoration:none; }
+  .src:hover { text-decoration:underline; }
 
   .tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--line);
           margin-bottom:1rem; flex-wrap:wrap; }
@@ -378,9 +381,43 @@
     {% endif %}
   </section>
 
+  <!-- ===================== STRATEGY ===================== -->
+  <section>
+    <h2><span class="num">05</span>Where strategy actually diverged</h2>
+    <p class="sub">
+      Races ranked by how much teams disagreed. When one driver runs a single
+      stint and another runs five, the result was decided in the pit lane rather
+      than on track — those are the races worth reading about.
+    </p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr>
+          <th class="num">R</th><th>Grand Prix</th><th class="num">Stint spread</th>
+          <th class="num">Avg stints</th><th class="num">Avg stop</th>
+          <th>Conditions</th>
+        </tr></thead>
+        <tbody>
+        {% for r in strategy %}
+          <tr>
+            <td class="num">{{ r.round }}</td>
+            <td>{{ r.race_name }}</td>
+            <td class="num">{{ r.min_stints }}–{{ r.max_stints }}</td>
+            <td class="num">{{ r.avg_stints }}</td>
+            <td class="num">{{ (r.avg_stop_s ~ " s") if r.avg_stop_s else "—" }}</td>
+            <td>{% if r.precipitation_mm is not none %}
+                  <span class="pill {{ 'wet' if r.was_wet else 'dry' }}">
+                    {{ r.precipitation_mm }} mm</span>
+                {% else %}<span style="color:var(--dim)">no data</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ===================== AGENT ===================== -->
   <section>
-    <h2><span class="num">05</span>What the agent has done</h2>
+    <h2><span class="num">06</span>What the assistant has done</h2>
     <p class="sub">
       This page only reads. Everything below was created by the assistant when
       someone asked it to — track a driver, log a prediction before a race, save
@@ -429,6 +466,52 @@
         {% else %}<div class="empty">No notes saved yet.</div>{% endif %}
       </div>
     </div>
+  </section>
+
+  <!-- ===================== CDF ANALYTICS ===================== -->
+  <section>
+    <h2><span class="num">07</span>Agent activity, via Change Data Feed</h2>
+    <p class="sub">
+      Every tool call the assistant makes is written to the operational store,
+      carried into the analytics table by Change Data Feed, and read back here.
+      This is what the assistant actually did — not what it reported doing.
+    </p>
+
+    {% if analytics.totals %}
+    <div class="stats" style="margin-top:0">
+      <div class="stat"><b>{{ analytics.totals.calls }}</b><span>Tool calls</span></div>
+      <div class="stat"><b>{{ analytics.totals.writes }}</b><span>Writes</span></div>
+      <div class="stat"><b>{{ analytics.totals.errors }}</b><span>Errors</span></div>
+      <div class="stat"><b>{{ analytics.totals.sessions }}</b><span>Sessions</span></div>
+    </div>
+    {% endif %}
+
+    {% if analytics.tools %}
+      {% set top = analytics.tools[0].call_count %}
+      <div class="panel scroll" style="margin-top:1rem">
+        <table>
+          <thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Writes</th>
+            <th class="num">Errors</th><th class="num">Avg ms</th>
+            <th style="width:28%">Share</th></tr></thead>
+          <tbody>
+          {% for t in analytics.tools %}
+            <tr>
+              <td><code>{{ t.tool_name }}</code></td>
+              <td class="num">{{ t.call_count }}</td>
+              <td class="num">{% if t.write_count %}<b style="color:var(--accent)">{{ t.write_count }}</b>{% else %}—{% endif %}</td>
+              <td class="num">{{ t.error_count or "—" }}</td>
+              <td class="num">{{ t.avg_duration_ms or "—" }}</td>
+              <td><div class="bar"><i style="width:{{ (t.call_count / top * 100)|round(1) }}%"></i></div></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="panel"><div class="empty">
+        No tool calls recorded yet. Ask the assistant something and reload.
+      </div></div>
+    {% endif %}
   </section>
 
 {% endif %}
@@ -481,6 +564,8 @@ async function runSearch(ev) {
         <span class="sim">${Number(r.similarity).toFixed(3)}</span>
       </div>
       <p>${esc(r.chunk_text).slice(0, 420)}…</p>
+      ${r.url ? `<a class="src" href="${esc(r.url)}" target="_blank" rel="noopener">
+          Read the full ${esc(r.section)} &rarr;</a>` : ""}
     </div>`).join("");
 }
 </script>

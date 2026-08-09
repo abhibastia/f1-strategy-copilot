@@ -159,6 +159,58 @@ def search(query: str, top_k: int = 6, season: int | None = None) -> list[dict]:
     """, tuple(params))
 
 
+def agent_analytics() -> dict:
+    """Per-tool analytics materialised from the Change Data Feed.
+
+    Read from Lakebase rather than from the Delta table the CDF job writes:
+    querying Delta per page render would spend a SQL warehouse query every time
+    someone loads the page, which on Free Edition's daily quota is exactly the
+    behaviour that kills a demo. The Delta table is the analytical record; this
+    aggregate mirrors it for serving.
+
+    `cdf_materialised` reports whether the CDF job has run, so the page can say
+    "not yet materialised" instead of implying the loop does not exist.
+    """
+    tools = schema.query(f"""
+        SELECT tool_name,
+               count(*)                                              AS call_count,
+               count(*) FILTER (WHERE is_write)                      AS write_count,
+               count(*) FILTER (WHERE outcome <> 'ok')               AS error_count,
+               round(avg(duration_ms))                               AS avg_duration_ms,
+               count(DISTINCT session_id)                            AS sessions,
+               max(called_at)                                        AS last_called_at
+        FROM {schema.TOOL_CALLS}
+        GROUP BY tool_name ORDER BY call_count DESC""")
+    totals = schema.query(f"""
+        SELECT count(*) AS calls,
+               count(*) FILTER (WHERE is_write)        AS writes,
+               count(*) FILTER (WHERE outcome <> 'ok') AS errors,
+               count(DISTINCT session_id)              AS sessions
+        FROM {schema.TOOL_CALLS}""")[0]
+    return {"tools": tools, "totals": totals}
+
+
+def strategy_races(season: int, limit: int = 12) -> list[dict]:
+    """Races ranked by how much strategy varied — where stop counts differed
+    most between drivers, which is where the interesting decisions were."""
+    return schema.query("""
+        SELECT s.season, s.round, r.race_name, w.was_wet, w.precipitation_mm,
+               count(DISTINCT s.driver_id)                       AS drivers,
+               round(avg(s.stint_number)::numeric, 2)            AS avg_stints,
+               max(s.stint_number)                               AS max_stints,
+               min(s.stint_number)                               AS min_stints,
+               (SELECT round(avg(p.duration_s)::numeric, 2) FROM f1_pit_stops p
+                 WHERE p.season = s.season AND p.round = s.round
+                   AND p.duration_s IS NOT NULL AND p.duration_s < 120) AS avg_stop_s
+        FROM f1_stints s
+        JOIN f1_races r ON r.season = s.season AND r.round = s.round
+        LEFT JOIN f1_race_weather w ON w.season = s.season AND w.round = s.round
+        WHERE s.season = %s
+        GROUP BY 1,2,3,4,5
+        ORDER BY (max(s.stint_number) - min(s.stint_number)) DESC, s.round
+        LIMIT %s""", (int(season), int(limit)))
+
+
 def agent_activity() -> dict:
     """Everything the agent has written. Proof that the write tools work."""
     return {
