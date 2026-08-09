@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>F1 Strategy Copilot</title>
 <style>
+  /* Theme has three states, and the layering matters.
+     1. Bare :root is the dark default.
+     2. The media query applies light when the OS asks for it - but only when
+        the reader has not explicitly chosen dark, hence the :not().
+     3. An explicit [data-theme] wins over both, so the toggle works in either
+        direction rather than only away from the OS preference.
+     Every colour is defined on bare :root first; a token whose only definition
+     lives inside a media query disappears the moment the query does not match. */
   :root {
     color-scheme: dark;
     --bg:#0b0d11; --panel:#131720; --panel-2:#181d28; --line:#242b3a;
@@ -13,11 +21,21 @@
     --wet:#3b82f6; --dry:#f59e0b; --ok:#22c55e; --warn:#f97316;
   }
   @media (prefers-color-scheme: light) {
-    :root {
+    :root:not([data-theme="dark"]) {
       color-scheme: light;
       --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f6; --line:#dde1e9;
       --fg:#12151c; --muted:#5c6679; --dim:#8b95a8;
     }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f6; --line:#dde1e9;
+    --fg:#12151c; --muted:#5c6679; --dim:#8b95a8;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#0b0d11; --panel:#131720; --panel-2:#181d28; --line:#242b3a;
+    --fg:#e8ecf4; --muted:#8b95a8; --dim:#5c6679;
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
@@ -30,6 +48,14 @@
   header { border-bottom:1px solid var(--line); background:
       linear-gradient(180deg, rgba(232,17,45,.10), transparent 70%); }
   .head { max-width:74rem; margin:0 auto; padding:2.25rem 1.25rem 1.75rem; }
+  .headrow { display:flex; gap:1rem; align-items:flex-start;
+             justify-content:space-between; }
+  .theme-btn { flex:none; background:var(--panel); border:1px solid var(--line);
+               color:var(--muted); border-radius:.5rem; cursor:pointer;
+               padding:.45rem .7rem; font:inherit; font-size:.82rem;
+               display:flex; align-items:center; gap:.4rem; line-height:1; }
+  .theme-btn:hover { color:var(--fg); border-color:var(--accent); }
+  .theme-btn svg { width:1rem; height:1rem; }
   .brand { display:flex; gap:1.1rem; align-items:flex-start; }
   .mark { width:5.5rem; height:2.2rem; flex:none; color:var(--fg); margin-top:.45rem; }
   @media (max-width:38rem) { .brand { gap:.8rem; } .mark { width:4rem; } }
@@ -183,6 +209,7 @@
 
 <header>
   <div class="head">
+    <div class="headrow">
     <div class="brand">
       <!-- Motorsport mark drawn inline rather than the official Formula 1
            logo, which is a registered trademark of Formula One World
@@ -215,6 +242,14 @@
           questions that need all three at once.
         </p>
       </div>
+    </div>
+
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()"
+              aria-label="Switch between light and dark themes" title="Switch theme">
+        <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" aria-hidden="true"></svg>
+        <span id="theme-label">Theme</span>
+      </button>
     </div>
 
     {% if stats %}
@@ -601,6 +636,46 @@
 </div>
 
 <script>
+// Applied as early as possible: setting the attribute after first paint makes
+// the page flash the wrong theme on every load for anyone who has chosen the
+// non-default one.
+(function () {
+  const saved = localStorage.getItem("f1-theme");
+  if (saved === "light" || saved === "dark") {
+    document.documentElement.setAttribute("data-theme", saved);
+  }
+})();
+
+const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+const MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme")
+      || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+}
+
+function paintThemeButton() {
+  const dark = currentTheme() === "dark";
+  // Offer the theme you would switch TO, not the one you are in - a button
+  // labelled with the current state reads as a status, not a control.
+  document.getElementById("theme-icon").innerHTML = dark ? SUN : MOON;
+  document.getElementById("theme-label").textContent = dark ? "Light" : "Dark";
+}
+
+function toggleTheme() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("f1-theme", next);
+  paintThemeButton();
+}
+
+window.addEventListener("DOMContentLoaded", paintThemeButton);
+// Follow the OS while the reader has expressed no preference of their own.
+window.matchMedia("(prefers-color-scheme: light)")
+      .addEventListener("change", () => {
+        if (!localStorage.getItem("f1-theme")) paintThemeButton();
+      });
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
