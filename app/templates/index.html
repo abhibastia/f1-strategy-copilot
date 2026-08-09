@@ -151,6 +151,13 @@
   .chat-form { display:flex; gap:.6rem; padding:.85rem 1.15rem;
                border-top:1px solid var(--line); background:var(--panel-2); }
   .chat-form input { flex:1; min-width:0; }
+  .saved { color:var(--accent); font-weight:600; text-decoration:none; }
+  .saved:hover { text-decoration:underline; }
+  /* Offset anchor jumps so a target section is not hidden under the top of the
+     viewport when arriving from the chat. */
+  section[id] { scroll-margin-top:1.5rem; }
+  .flash { animation:flash 2.2s ease-out 1; }
+  @keyframes flash { 0%,15% { background:rgba(232,17,45,.10) } 100% { background:transparent } }
   .thinking { color:var(--dim); font-size:.9rem; }
   .thinking::after { content:"▍"; animation:blink 1s steps(2) infinite; }
   @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
@@ -486,7 +493,7 @@
   </section>
 
   <!-- ===================== AGENT ===================== -->
-  <section>
+  <section id="activity">
     <h2><span class="num">07</span>What the assistant has done</h2>
     <p class="sub">
       This page only reads. Everything below was created by the assistant when
@@ -599,6 +606,15 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
 
 let history = [];
 
+// Arriving from a write: draw the eye to the section that just changed,
+// otherwise the page looks identical to the one the user just left.
+if (location.hash === "#activity") {
+  window.addEventListener("DOMContentLoaded", () => {
+    const el = document.getElementById("activity");
+    if (el) el.classList.add("flash");
+  });
+}
+
 function askThis(text) {
   document.getElementById("q-chat").value = text;
   sendChat(new Event("submit"));
@@ -649,8 +665,9 @@ async function sendChat(ev) {
     const answer = esc(d.answer || "").split("\n\n")
       .filter(Boolean).map(p => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("");
     pending.querySelector(".bubble").innerHTML = renderTrace(d.trace) + answer +
-      (d.wrote ? `<p style="color:var(--accent);font-size:.85rem">
-         Saved. Reload to see it under “What the assistant has done”.</p>` : "");
+      (d.wrote ? `<p style="font-size:.85rem">
+         <a class="saved" href="?season={{ season }}#activity">
+           Saved — view it under “What the assistant has done” &rarr;</a></p>` : "");
 
     history.push({role: "user", content: question});
     history.push({role: "assistant", content: d.answer || ""});

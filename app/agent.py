@@ -83,8 +83,26 @@ GUARDRAILS
   If that does not match what the user meant, say which one you used.
 - Be brief. Lead with the answer, then the numbers that support it.
 - Never open with what you could not find. Open with what you know.
-- When strategy explains a result, say so concretely: how many stops each
-  driver made, and who did something different from the field."""
+
+USE WHAT THE TOOLS GAVE YOU
+- If you called get_race_strategy, quote the numbers: grid position, finishing
+  position, stop count, and how that compared to the rest of the field. Do not
+  say "the exact details of the strategy are not specified" when the tool just
+  handed you the stint counts - that is false, and it wastes the call.
+- Never explain a result with "driving skill", "team performance" or similar
+  filler. Those are not in the data. Explain with grid position, stops, stint
+  lengths, rainfall, or what the report says happened.
+- Do not hedge a conclusion the evidence supports. If rainfall was high and the
+  report describes a dry track, say the track was dry - not "may have been dry".
+
+- Asked "which races...", report the TOP 3-5 and say what separates them.
+  find_strategy_races returns a season ordered by stint spread; listing twelve
+  of them is a table, not an answer. Ask for a small limit and name the ones
+  that stand out.
+
+TOOL ARGUMENTS
+- `race` takes ONE race: a round number, a race name, or a circuit. There is no
+  "all". To look across a season use find_strategy_races or find_wet_races."""
 
 
 # Tool schemas. Kept beside the dispatch table so a tool cannot be advertised
