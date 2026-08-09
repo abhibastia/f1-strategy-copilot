@@ -28,13 +28,19 @@ id_rsa*
 # deploying from their own workspace.
 .databricks/
 
-# --- Generated app payload --------------------------------------------------
-# scripts/build_app.sh copies f1lake/ into each app directory so a Databricks
-# App - which deploys from a single source path - can import it. f1lake/ at the
-# repo root is the single source of truth; these copies are build output and
-# committing them is how two copies silently drift apart.
-mcp_server/f1lake/
-app/f1lake/
+# --- Generated app payload: DELIBERATELY NOT IGNORED -------------------------
+# scripts/build_app.sh copies f1lake/ into each app directory, because a
+# Databricks App deploys from a single source path and a sibling package is not
+# importable at runtime.
+#
+# These copies were ignored at first, to avoid two files drifting apart. That
+# was wrong: `databricks sync` honours .gitignore, so ignoring them silently
+# stripped f1lake/ out of the deployment and the app failed on
+# `from f1lake import schema` before serving a request. There is no way to have
+# the payload deployed but untracked.
+#
+# So the copies are committed, and build_app.sh regenerates them. Run it before
+# committing: `git diff` then shows any drift instead of hiding it.
 
 # --- Warehouse query cache --------------------------------------------------
 # Gold marts pulled from Delta by f1lake/seed_gold.py, cached so a failed seed
@@ -42,6 +48,11 @@ app/f1lake/
 # truth - and 1.8 MB of it. Regenerate with `seed_gold.py --refresh`.
 data/f1_driver_performance.json
 data/f1_championship.json
+
+# Lap times: ~1,133 rows per race across 59 races. Large, slow to fetch, and
+# fully regenerable with `python -m harvest.run_laps`. Pit stops ARE committed -
+# they are small and are what the stint reconstruction depends on.
+data/laps/
 
 # --- Editors / OS -----------------------------------------------------------
 .idea/
