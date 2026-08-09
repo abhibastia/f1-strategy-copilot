@@ -71,7 +71,8 @@ def resolve_driver(name: str, season: int | None = None) -> dict:
         return exact[0]
 
     # Fall back to a substring match, which is what catches "verstappen".
-    where = "WHERE (lower(driver_name) LIKE %s OR lower(driver_id) LIKE %s)"
+    where = ("WHERE (unaccent(lower(driver_name)) LIKE unaccent(%s) "
+             "    OR lower(driver_id) LIKE %s)")
     params = [f"%{needle}%", f"%{needle}%"]
     if season:
         where += " AND season = %s"
@@ -106,11 +107,24 @@ def resolve_race(season: int, round_or_name) -> dict:
             (season, rnd),
         )
     except (TypeError, ValueError):
+        # Match the circuit as well as the race name, and fold accents.
+        #
+        # Both halves were real failures. People say "Monza", "Spa" and
+        # "Silverstone" far more often than "Italian Grand Prix", and matching
+        # only race_name made the agent burn three extra tool calls retrying.
+        # Separately, the data says "Sao Paulo Grand Prix" with an accent while
+        # nobody types one, so an exact LIKE silently failed and the agent told
+        # the user the race did not exist.
+        needle = str(round_or_name).strip().lower()
         rows = schema.query(
             f"SELECT season, round, race_name, race_date, circuit_name "
-            f"FROM {schema.RACES} WHERE season = %s AND lower(race_name) LIKE %s "
+            f"FROM {schema.RACES} "
+            f"WHERE season = %s AND ("
+            f"     unaccent(lower(race_name))    LIKE unaccent(%s) "
+            f"  OR unaccent(lower(circuit_name)) LIKE unaccent(%s) "
+            f"  OR lower(circuit_id)             LIKE %s) "
             f"ORDER BY round",
-            (season, f"%{str(round_or_name).strip().lower()}%"),
+            (season, f"%{needle}%", f"%{needle}%", f"%{needle}%"),
         )
     if not rows:
         raise UnknownRaceError(f"No race matching {round_or_name!r} in {season}")
