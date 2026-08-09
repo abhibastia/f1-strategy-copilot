@@ -1,0 +1,42 @@
+# Asset Bundle for the AI F1 Strategy Copilot.
+#
+# Everything that produces or refreshes data runs here as a Databricks job. The
+# same modules run locally for development and testing - the entrypoints in
+# jobs/ are thin wrappers, and the only difference is where the race spine is
+# read from (a local directory locally, the Unity Catalog Volume on Databricks).
+#
+# The medallion pipeline itself lives in pipeline/ and is deployed by its own
+# bundle; this one owns the jobs that sit either side of it.
+#
+#   databricks bundle validate -t dev --profile <profile>
+#   databricks bundle deploy   -t dev --profile <profile>
+#   databricks bundle run f1_full_refresh -t dev --profile <profile>
+
+bundle:
+  name: f1-strategy-copilot
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog holding the medallion tables
+    default: f1
+  lakebase_scope:
+    description: Databricks secret scope holding the Lakebase URL
+    default: database
+  lakebase_key:
+    description: Secret key holding the base64-encoded Postgres URL
+    default: lakebase-url
+  landing_root:
+    description: UC Volume the ingestion job writes race JSON into
+    default: /Volumes/f1/raw/landing
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
+    workspace:
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}

@@ -60,29 +60,54 @@ lives in the prose. See [`DESIGN.md`](DESIGN.md) for the full reasoning.
 ## 2. Architecture
 
 ```mermaid
-flowchart TB
-    subgraph API["Third-party APIs"]
-        J["Jolpica-F1<br/>results · qualifying · standings<br/>pit stops · lap times"]
-        W["Wikimedia<br/>race reports"]
-        O["Open-Meteo archive<br/>ERA5 observations"]
+flowchart TD
+    subgraph SRC[" Third-party APIs "]
+        direction LR
+        J["Jolpica-F1<br/><small>results · standings<br/>pit stops · laps</small>"]
+        W["Wikimedia<br/><small>race reports</small>"]
+        O["Open-Meteo<br/><small>ERA5 archive</small>"]
     end
 
-    J -->|"Databricks Job<br/>f1_ingest_incremental"| LAND["UC Volume<br/>f1.raw.landing"]
-    LAND -->|Auto Loader| PIPE["Lakeflow pipeline<br/>Bronze → Silver → Gold<br/>SCD-2 via AUTO CDC"]
-    PIPE --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression<br/>dim_race")]
+    subgraph DBX[" Databricks Jobs &amp; Pipeline "]
+        direction TB
+        ING["f1_ingest_incremental<br/><small>Job · Jolpica → Volume</small>"]
+        MED["f1_medallion_pipeline<br/><small>Lakeflow · Bronze → Silver → Gold<br/>SCD-2 via AUTO CDC</small>"]
+        HAR["f1_harvest<br/><small>Job · reports · weather · stops</small>"]
+        SEED["f1_seed_lakebase<br/><small>Job · Gold → Lakebase</small>"]
+        EMB["f1_embed<br/><small>Job · chunk → 384-dim vectors</small>"]
+        CDF["f1_cdf_analytics<br/><small>Job · Change Data Feed</small>"]
+    end
 
-    GOLD -->|"seeded once<br/>2 warehouse queries"| LB
-    W -->|"harvest/ · chunk · embed"| LB
-    O -->|"harvest/"| LB
-    J -->|"pit stops · laps"| LB
+    J --> ING --> VOL[("UC Volume<br/>f1.raw.landing")] --> MED
+    MED --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression<br/>dim_race")]
 
-    LB[("Lakebase Postgres<br/>reference · embeddings · weather<br/>stints · watchlist · notes · predictions<br/>agent_tool_calls")]
+    W --> HAR
+    O --> HAR
+    J --> HAR
+    GOLD --> SEED
 
-    LB --> MCP["App 1 — MCP server<br/>14 tools for external agents"]
-    LB --> UI["App 2 — Strategy Copilot<br/>chat + analysis views"]
-    UI -->|"tool calls, incl. writes"| LB
-    LB -->|"Change Data Feed job"| CDFT[("Delta<br/>agent_tool_calls (CDF on)<br/>agent_activity_analytics")]
-    CDFT --> UI
+    HAR --> LB
+    SEED --> LB
+    EMB --> LB
+
+    LB[("Lakebase Postgres<br/><small>races · documents · embeddings · weather<br/>stints · watchlist · notes · predictions<br/>agent_tool_calls</small>")]
+
+    LB --> MCP["Databricks App 1<br/>MCP server · 14 tools"]
+    LB --> UI["Databricks App 2<br/>Strategy Copilot"]
+    UI -. "3 write tools" .-> LB
+    MCP -. "3 write tools" .-> LB
+
+    LB --> CDF --> DELTA[("Delta<br/>agent_tool_calls <b>CDF on</b><br/>agent_activity_analytics")]
+    DELTA --> UI
+
+    classDef api fill:#1f2937,stroke:#4b5563,color:#e5e7eb
+    classDef job fill:#7f1d1d,stroke:#dc2626,color:#fee2e2
+    classDef store fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe
+    classDef app fill:#14532d,stroke:#22c55e,color:#dcfce7
+    class J,W,O api
+    class ING,MED,HAR,SEED,EMB,CDF job
+    class VOL,GOLD,LB,DELTA store
+    class MCP,UI app
 ```
 
 **Dataflow in one line:** three APIs → Spark medallion (Delta) + local harvest →
