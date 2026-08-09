@@ -23,6 +23,7 @@ import os
 
 from flask import Flask, jsonify, render_template, request
 
+import agent
 import ui_data
 
 logging.basicConfig(level=logging.INFO)
@@ -76,6 +77,40 @@ def index():
             analytics={"tools": [], "totals": {}}, strategy=[],
             mcp_url=MCP_URL, error=str(exc),
         )
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """Ask the assistant a question.
+
+    Returns the answer AND the full tool-call trace. A chat endpoint that
+    returned only prose would give a reader no way to tell whether the agent
+    used its tools or invented the answer - which is the whole thing being
+    demonstrated. The trace is rendered inline in the UI for the same reason.
+
+    Conversation state stays on the client. The agent is stateless per request,
+    so nothing here depends on sticky sessions or a server-side store, and a
+    restarted container loses no conversation the browser still holds.
+    """
+    body = request.get_json(silent=True) or {}
+    question = (body.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "Ask a question first."}), 400
+
+    history = body.get("history") or []
+    # Cap the history sent upstream. A long thread would push the tool results
+    # the model actually needs out of the context window.
+    history = [m for m in history if m.get("role") in ("user", "assistant")][-6:]
+
+    try:
+        result = agent.ask(question, history=history)
+        return jsonify(result)
+    except Exception as exc:
+        logger.exception("Agent call failed")
+        return jsonify({
+            "error": "The assistant could not answer that.",
+            "detail": str(exc)[:300],
+        }), 503
 
 
 @app.route("/api/search")
