@@ -67,6 +67,10 @@ lives in the prose. See [`DESIGN.md`](DESIGN.md) for the full reasoning.
 
 ## 2. Architecture
 
+*(GitHub renders the diagram below. Reading this as a file instead — in an
+editor, or from the submission archive — see `docs/diagrams/`, regenerated from
+this markdown by `scripts/render_diagrams.sh`.)*
+
 ```mermaid
 flowchart TD
     subgraph SRC[" Third-party APIs "]
