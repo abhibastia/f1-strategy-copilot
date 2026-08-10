@@ -99,6 +99,7 @@ def resolve_driver(name: str, season: int | None = None) -> dict:
 def resolve_race(season: int, round_or_name) -> dict:
     """Resolve (season, round) or (season, race name) to one race."""
     season = int(season)
+    needle = None          # set only on the name path; guards the alias lookup
     try:
         rnd = int(round_or_name)
         rows = schema.query(
@@ -125,6 +126,25 @@ def resolve_race(season: int, round_or_name) -> dict:
             f"  OR lower(circuit_id)             LIKE %s) "
             f"ORDER BY round",
             (season, f"%{needle}%", f"%{needle}%", f"%{needle}%"),
+        )
+    if not rows and needle:
+        # Races get renamed. The same circuit is the "São Paulo Grand Prix" in
+        # 2024 and the "Brazilian Grand Prix" in 2026; Barcelona and Spanish
+        # likewise. Asking about Brazil in 2024 therefore failed while the same
+        # question about 2026 worked, which reads as missing data rather than a
+        # naming change.
+        #
+        # The aliases are derived from the corpus rather than hardcoded: find
+        # the circuit that has ever carried this name, then take that circuit's
+        # race in the season asked for. A future rename needs no code change.
+        rows = schema.query(
+            f"SELECT season, round, race_name, race_date, circuit_name "
+            f"FROM {schema.RACES} "
+            f"WHERE season = %s AND circuit_id IN ("
+            f"    SELECT DISTINCT circuit_id FROM {schema.RACES} "
+            f"     WHERE unaccent(lower(race_name)) LIKE unaccent(%s)) "
+            f"ORDER BY round",
+            (season, f"%{needle}%"),
         )
     if not rows:
         raise UnknownRaceError(f"No race matching {round_or_name!r} in {season}")

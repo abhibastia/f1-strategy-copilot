@@ -169,3 +169,22 @@ class TestFollowups:
 
     def test_empty_trace_still_offers_something(self, agent):
         assert len(agent._followups([])) == 3
+
+
+class TestWroteFlag:
+    """`wrote` drives the "Saved - view it" link in the UI. A write tool that
+    was called but failed must not set it, or the page sends a user to look for
+    a row that does not exist - the exact failure this project is about."""
+
+    def test_failed_write_does_not_report_success(self, broker, agent, monkeypatch):
+        def boom(*_a, **_k):
+            raise broker.UnknownRaceError("No race matching 'Atlantis' in 2024")
+        monkeypatch.setitem(agent.DISPATCH, "save_race_note", boom)
+        result = agent.ask("Save a note about the 2024 Atlantis Grand Prix: test.")
+        assert result["wrote"] is False, "a failed write reported success"
+
+    def test_successful_write_reports_success(self, broker, agent, marker):
+        ref = marker("note")
+        result = agent.ask(f"Save a note about the 2024 Sao Paulo Grand Prix: {ref}")
+        assert result["wrote"] is True
+        assert any(n["note"] == ref for n in broker.get_notes(2024)["notes"])

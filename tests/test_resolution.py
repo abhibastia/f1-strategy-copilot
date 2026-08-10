@@ -177,3 +177,30 @@ class TestSessionTimeline:
         names = {s["tool_name"] for ses in ui_data.recent_sessions(20)
                  for s in ses["steps"]}
         assert not any(n.startswith("test_") for n in names)
+
+
+class TestRenamedRaces:
+    """Races get renamed. Interlagos is the São Paulo Grand Prix in 2024 and the
+    Brazilian Grand Prix in 2026; Catalunya is Spanish then Barcelona. Asking
+    about Brazil in 2024 failed while the same question about 2026 worked, which
+    reads as missing data rather than a naming change."""
+
+    def test_a_later_name_resolves_an_earlier_season(self, broker):
+        race = broker.resolve_race(2024, "Brazilian Grand Prix")
+        assert race["race_name"] == "São Paulo Grand Prix"
+        assert race["round"] == 21
+
+    def test_an_earlier_name_still_resolves_its_own_season(self, broker):
+        assert broker.resolve_race(2026, "Brazilian Grand Prix")["round"] == 20
+
+    def test_the_other_renamed_circuit(self, broker):
+        assert broker.resolve_race(2026, "Barcelona")["race_name"] == "Barcelona Grand Prix"
+
+    def test_a_round_number_never_reaches_the_alias_lookup(self, broker):
+        """`needle` is only bound on the name path; an unguarded fallback would
+        raise NameError for every numeric round."""
+        assert broker.resolve_race(2024, 16)["race_name"] == "Italian Grand Prix"
+
+    def test_a_genuinely_unknown_race_still_fails(self, broker):
+        with pytest.raises(broker.UnknownRaceError):
+            broker.resolve_race(2024, "Atlantis")

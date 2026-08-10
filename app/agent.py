@@ -402,12 +402,13 @@ def ask(question: str, history: list[dict] | None = None,
     messages.append({"role": "user", "content": question})
 
     trace = []
+    wrote_ok = False
     for _ in range(MAX_TURNS):
         message = _post(messages)
         calls = message.get("tool_calls") or []
         if not calls:
             return {"answer": _text(message.get("content")), "trace": trace,
-                    "wrote": any(t["tool"] in WRITE_TOOLS for t in trace),
+                    "wrote": wrote_ok,
                     "followups": _followups(trace)}
 
         messages.append({"role": "assistant", "content": message.get("content") or "",
@@ -436,6 +437,14 @@ def ask(question: str, history: list[dict] | None = None,
                 is_write=name in WRITE_TOOLS,
                 summary=_summarise(name, result),
                 duration_ms=duration_ms, session_id=session_id)
+            # "Did a write succeed" is not "was a write tool called". A write
+            # that failed to resolve its race still put the tool in the trace,
+            # and the page used that to render "Saved - view it under what the
+            # assistant has done", linking to a row that was never created.
+            # This project exists to catch writes that report success; the flag
+            # reporting them cannot be the one that lies.
+            if name in WRITE_TOOLS and isinstance(result, dict) and result.get("written"):
+                wrote_ok = True
             trace.append({"tool": name, "arguments": args, "result": trimmed,
                           "is_write": name in WRITE_TOOLS,
                           "evidence": _evidence(name, result)})
@@ -447,7 +456,7 @@ def ask(question: str, history: list[dict] | None = None,
                      "content": "Answer now using what the tools already returned."})
     message = _post(messages)
     return {"answer": _text(message.get("content")), "trace": trace,
-            "wrote": any(t["tool"] in WRITE_TOOLS for t in trace),
+            "wrote": wrote_ok,
             "followups": _followups(trace),
             "note": "Stopped after the maximum number of tool calls."}
 
