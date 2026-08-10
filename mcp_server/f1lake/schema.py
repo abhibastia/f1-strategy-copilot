@@ -361,3 +361,80 @@ def ensure_schema() -> None:
                     # Only CREATE EXTENSION should reach here. Anything else
                     # genuinely failing surfaces later as a missing table.
                     continue
+
+
+def smoke_test() -> int:
+    """Write one row, read it back, delete it. Returns 0 on success.
+
+    The check that matters is the read-back, not the write. An
+    `INSERT ... RETURNING` run on a connection that is never committed hands
+    back a real row with a real id and then rolls the whole thing back when the
+    connection closes - so a write can report complete success and leave nothing
+    behind. That shipped here once. Anything claiming to verify the database is
+    reachable has to close the connection and look again.
+
+    Cleans up after itself, so it is safe to run against the live database.
+    """
+    import uuid as _uuid
+
+    marker = f"smoke-{_uuid.uuid4().hex[:8]}"
+    print(f"  connecting     … {'ok' if query('SELECT 1 AS ok')[0]['ok'] == 1 else 'FAILED'}")
+
+    race = query(f"SELECT season, round FROM {RACES} ORDER BY season, round LIMIT 1")
+    if not race:
+        print("  FAILED: no races loaded — run the harvest and seed steps first")
+        return 1
+    season, rnd = race[0]["season"], race[0]["round"]
+
+    rows = returning(
+        f"INSERT INTO {NOTES} (user_id, season, round, note) "
+        f"VALUES (%s, %s, %s, %s) RETURNING id",
+        ("smoke-test", season, rnd, marker))
+    new_id = rows[0]["id"]
+    print(f"  wrote          … id {new_id}")
+
+    # New connection on purpose: the point is that the row outlived the one
+    # that created it.
+    found = query(f"SELECT id FROM {NOTES} WHERE note = %s", (marker,))
+    if not found:
+        print("  FAILED: the write reported success but the row is not readable")
+        return 1
+    print(f"  read back      … id {found[0]['id']}")
+
+    execute(f"DELETE FROM {NOTES} WHERE note = %s", (marker,))
+    left = query(f"SELECT 1 FROM {NOTES} WHERE note = %s", (marker,))
+    print(f"  cleaned up     … {'ok' if not left else 'FAILED'}")
+    return 0 if not left else 1
+
+
+def _main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m f1lake.schema",
+        description="Create the Lakebase tables, or check the write path works.")
+    parser.add_argument("--ensure", action="store_true",
+                        help="create every table and index (idempotent)")
+    parser.add_argument("--smoke", action="store_true",
+                        help="write one row, read it back on a new connection, delete it")
+    args = parser.parse_args()
+
+    if not (args.ensure or args.smoke):
+        parser.print_help()
+        return 2
+
+    if args.ensure:
+        ensure_schema()
+        counts = query("""
+            SELECT (SELECT count(*) FROM f1_races)      AS races,
+                   (SELECT count(*) FROM f1_documents)  AS documents,
+                   (SELECT count(*) FROM f1_embeddings) AS embeddings""")[0]
+        print(f"  schema ensured … {counts['races']} races, "
+              f"{counts['documents']} documents, {counts['embeddings']} embeddings")
+    if args.smoke:
+        return smoke_test()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
