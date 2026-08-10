@@ -11,7 +11,7 @@
 # daily compute quota, and the Files API upload consumes none of it.
 #
 # Usage:
-#     python3 src/ingestion/ingest.py --mode backfill --root ./landing
+#     python3 ingestion/ingest.py --mode backfill --root ./landing
 #     ./scripts/upload_landing.sh [local_dir]
 
 set -euo pipefail
@@ -23,7 +23,7 @@ VOLUME_PATH="/Volumes/${CATALOG}/raw/landing"
 
 if [[ ! -d "$LOCAL_DIR" ]]; then
   echo "ERROR: '${LOCAL_DIR}' not found. Run the backfill first:" >&2
-  echo "  python3 src/ingestion/ingest.py --mode backfill --root ${LOCAL_DIR}" >&2
+  echo "  python3 ingestion/ingest.py --mode backfill --root ${LOCAL_DIR}" >&2
   exit 1
 fi
 

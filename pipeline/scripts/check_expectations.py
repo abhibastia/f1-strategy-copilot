@@ -16,7 +16,11 @@ import ast
 import re
 import sys
 
-PATH = "src/pipeline/02_silver_facts.py"
+# Resolved from this file rather than the working directory, so the check
+# runs the same from the repo root, from pipeline/, or from CI.
+import os
+PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "medallion", "02_silver_facts.py")
 tree = ast.parse(open(PATH).read())
 
 SQL_WORDS = {
