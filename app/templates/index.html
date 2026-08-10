@@ -17,7 +17,14 @@
     color-scheme: dark;
     --bg:#0b0d11; --panel:#131720; --panel-2:#181d28; --line:#242b3a;
     --fg:#e8ecf4; --muted:#8b95a8; --dim:#5c6679;
-    --accent:#e8112d;          /* F1 red */
+    /* Two accents, because one cannot do both jobs. --accent is the F1 red
+       used for FILLS - buttons, the write badge, the mark - where white sits
+       on top of it and the pairing passes AA. As TEXT the same red measures
+       3.88:1 on a panel, under the 4.5:1 body-text bar, and it is used at
+       .83rem for search links and similarity scores. --accent-ink is the same
+       hue moved to a legible lightness for each theme. */
+    --accent:#e8112d;          /* F1 red - fills only */
+    --accent-ink:#ff3b52;      /* 5.12:1 on --panel */
     --wet:#3b82f6; --dry:#f59e0b; --ok:#22c55e; --warn:#f97316;
   }
   @media (prefers-color-scheme: light) {
@@ -25,17 +32,20 @@
       color-scheme: light;
       --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f6; --line:#dde1e9;
       --fg:#12151c; --muted:#5c6679; --dim:#8b95a8;
+      --accent-ink:#c60a22;    /* 6.06:1 on white */
     }
   }
   :root[data-theme="light"] {
     color-scheme: light;
     --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f0f2f6; --line:#dde1e9;
     --fg:#12151c; --muted:#5c6679; --dim:#8b95a8;
+    --accent-ink:#c60a22;
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
     --bg:#0b0d11; --panel:#131720; --panel-2:#181d28; --line:#242b3a;
     --fg:#e8ecf4; --muted:#8b95a8; --dim:#5c6679;
+    --accent-ink:#ff3b52;
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
@@ -120,7 +130,7 @@
               padding:.3rem .6rem; border-radius:.4rem; white-space:nowrap; }
   .secnav a:hover { color:var(--fg); background:var(--panel-2); }
   .secnav a[aria-current="true"] { color:var(--fg); background:var(--panel-2); }
-  .secnav a[aria-current="true"] i { color:var(--accent); }
+  .secnav a[aria-current="true"] i { color:var(--accent-ink); }
   .secnav i { font-style:normal; font-variant-numeric:tabular-nums;
               color:var(--dim); margin-right:.35rem; }
 
@@ -153,7 +163,10 @@
   /* ---- sections ---- */
   section { margin-top:3rem; }
   h2 { font-size:1.18rem; margin:0 0 .3rem; letter-spacing:-.01em; }
-  h2 .num { color:var(--accent); font-variant-numeric:tabular-nums; margin-right:.5rem; }
+  /* Section numbers label, they do not emphasise. In red they competed with
+     the buttons for the same attention, which left nothing on the page
+     reliably meaning "you can act here". */
+  h2 .num { color:var(--dim); font-variant-numeric:tabular-nums; margin-right:.5rem; }
   .sub { color:var(--muted); margin:0 0 1.1rem; max-width:52rem; }
 
   .panel { background:var(--panel); border:1px solid var(--line);
@@ -163,7 +176,7 @@
   /* ---- thesis ---- */
   .finding { border-left:3px solid var(--accent); background:var(--panel-2);
              padding:.9rem 1.1rem; border-radius:.5rem; margin-bottom:1.1rem; }
-  .finding b { color:var(--accent); }
+  .finding b { color:var(--accent-ink); }
   .cards { display:grid; gap:.85rem; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); }
   .card { background:var(--panel); border:1px solid var(--line);
           border-radius:.75rem; padding:.95rem 1rem; display:flex;
@@ -197,7 +210,12 @@
   .pill.dry { background:rgba(245,158,11,.14); color:var(--dry); }
   .bar { height:.35rem; background:var(--panel-2); border-radius:1rem;
          overflow:hidden; min-width:4rem; }
-  .bar > i { display:block; height:100%; background:var(--accent); }
+  /* Blue, not red. These bars encode magnitude, and the finding they sit
+     under is that the retirement rate barely moves - 12.5% to 15.7% across
+     every rainfall threshold. Red reads as alarm and argued against the
+     conclusion the table exists to make. Blue is also the rainfall colour
+     used by the wet/dry pills, which ties the bar to its subject. */
+  .bar > i { display:block; height:100%; background:var(--wet); opacity:.8; }
 
   /* ---- search ---- */
   .searchbar { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:.9rem; }
@@ -218,10 +236,10 @@
               margin-bottom:.4rem; }
   .hit-head .r { font-weight:650; }
   .hit-head .s { color:var(--dim); font-size:.8rem; }
-  .sim { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent);
+  .sim { margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent-ink);
          font-weight:600; font-size:.85rem; }
   .hit p { margin:0 0 .45rem; color:var(--muted); font-size:.9rem; }
-  .src { color:var(--accent); font-size:.83rem; font-weight:600;
+  .src { color:var(--accent-ink); font-size:.83rem; font-weight:600;
          text-decoration:none; }
   .src:hover { text-decoration:underline; }
 
@@ -249,24 +267,24 @@
   .tcall { font-size:.82rem; color:var(--muted); margin-bottom:.2rem;
            font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .tcall .tname { color:var(--fg); }
-  .tcall.write .tname { color:var(--accent); font-weight:700; }
+  .tcall.write .tname { color:var(--accent-ink); font-weight:700; }
   .tcall .badge { display:inline-block; font-size:.62rem; letter-spacing:.06em;
                   padding:.02rem .35rem; border-radius:.25rem; margin-right:.4rem;
                   background:var(--panel-2); color:var(--dim);
                   font-family:inherit; text-transform:uppercase; }
-  .tcall.write .badge { background:rgba(232,17,45,.16); color:var(--accent); }
+  .tcall.write .badge { background:rgba(232,17,45,.16); color:var(--accent-ink); }
   /* The value the call returned, under the call itself. A tool name on its own
      proves nothing - it looks identical whether the tool answered or returned
      an empty row. The number is what makes the trace evidence. */
   .tcall .ev { display:block; color:var(--dim); font-size:.76rem;
                margin:.05rem 0 .3rem .2rem; font-family:inherit;
                white-space:normal; }
-  .tcall.write .ev { color:var(--accent); opacity:.85; }
+  .tcall.write .ev { color:var(--accent-ink); opacity:.85; }
   .chat-form { display:flex; gap:.5rem; padding:.8rem 1.05rem;
                border-top:1px solid var(--line); background:var(--panel-2); }
   .chat-form input { flex:1; min-width:0; }
   .chat-form button { padding:.6rem .9rem; }
-  .saved { color:var(--accent); font-weight:600; text-decoration:none; }
+  .saved { color:var(--accent-ink); font-weight:600; text-decoration:none; }
   .saved:hover { text-decoration:underline; }
   /* Offset anchor jumps so a target section is not hidden under the top of the
      viewport when arriving from the chat. */
@@ -298,7 +316,7 @@
   .ses-head code { background:none; padding:0; color:var(--muted);
                    font-size:.78rem; }
   .ses-meta { font-size:.78rem; color:var(--dim); }
-  .ses-meta b { color:var(--accent); font-weight:600; }
+  .ses-meta b { color:var(--accent-ink); font-weight:600; }
   .ses-meta b.bad { color:var(--warn); }
   .ses-head time { margin-left:auto; font-size:.72rem; color:var(--dim); }
   /* Numbered so the order reads as a sequence - which tool the agent reached
@@ -306,7 +324,7 @@
   .steps { margin:0; padding:.5rem .85rem .7rem 2.1rem; }
   .steps li { font-size:.82rem; color:var(--muted); margin-bottom:.3rem; }
   .steps li::marker { color:var(--dim); font-size:.72rem; }
-  .steps li.w code { color:var(--accent); font-weight:700; }
+  .steps li.w code { color:var(--accent-ink); font-weight:700; }
   .steps li.bad code { color:var(--warn); }
   .steps code { background:none; padding:0; color:var(--fg); font-size:.82rem; }
   .steps .ms { color:var(--dim); font-variant-numeric:tabular-nums;
@@ -319,7 +337,7 @@
          border-radius:.7rem; padding:.75rem .9rem; font-size:.88rem; }
   .how b { display:block; margin-bottom:.15rem; }
   .how span { color:var(--muted); }
-  .how i { color:var(--accent); font-style:normal; font-weight:700;
+  .how i { color:var(--dim); font-style:normal; font-weight:700;
            margin-right:.35rem; }
   .err { border:1px solid rgba(232,17,45,.5); background:rgba(232,17,45,.07);
          border-radius:.7rem; padding:1rem 1.2rem; }
@@ -518,10 +536,15 @@
     </p>
 
     <div class="finding">
-      Across 59 races, going from <b>any race</b> to <b>15 mm or more of rain</b>
-      moves the retirement rate only from
-      <b>{{ thresholds[0].dnf_pct }}%</b> to <b>{{ thresholds[-1].dnf_pct }}%</b>.
-      Daily rainfall is a <b>weak predictor</b> of a chaotic race.
+      {# Two highlights, not five. The sentence previously marked "any race",
+         "15 mm or more of rain", both percentages and "weak predictor" - which
+         is most of the sentence, and emphasis on most of a sentence is the same
+         as no emphasis. The two figures carry the argument; the conclusion is
+         the last thing read, so it holds without colour. #}
+      Across 59 races, going from any race to 15 mm or more of rain moves the
+      retirement rate only from <b>{{ thresholds[0].dnf_pct }}%</b> to
+      <b>{{ thresholds[-1].dnf_pct }}%</b>. Daily rainfall is a weak predictor
+      of a chaotic race.
     </div>
 
     <div class="panel scroll">
@@ -787,7 +810,7 @@
             <tr>
               <td><code>{{ t.tool_name }}</code></td>
               <td class="num">{{ t.call_count }}</td>
-              <td class="num">{% if t.write_count %}<b style="color:var(--accent)">{{ t.write_count }}</b>{% else %}—{% endif %}</td>
+              <td class="num">{% if t.write_count %}<b style="color:var(--accent-ink)">{{ t.write_count }}</b>{% else %}—{% endif %}</td>
               <td class="num">{{ t.error_count or "—" }}</td>
               <td class="num">{{ t.avg_duration_ms or "—" }}</td>
               <td><div class="bar"><i style="width:{{ (t.call_count / top * 100)|round(1) }}%"></i></div></td>
@@ -1092,7 +1115,7 @@ async function sendChat(ev) {
     saveChat();
   } catch (e) {
     pending.querySelector(".bubble").innerHTML =
-      `<span style="color:var(--accent)">${esc(e.message)}</span>` +
+      `<span style="color:var(--accent-ink)">${esc(e.message)}</span>` +
       ` <button class="chip" style="margin-left:.4rem"
                 onclick="askThis(${JSON.stringify(question).replace(/"/g, "&quot;")})">Retry</button>`;
     recordMsg("Copilot", "bot", pending);
