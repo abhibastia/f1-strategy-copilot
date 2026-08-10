@@ -157,8 +157,38 @@ current = changes.filter(
     F.col("_change_type").isin("insert", "update_postimage")
 )
 
+# One record per tool call, not one per time it appeared in the feed.
+#
+# Excluding update_preimage stops double-counting WITHIN a run. It does not stop
+# it ACROSS runs: the MERGE above rewrites every matched row, so each re-run
+# emits a fresh update_postimage for rows that landed long ago. Reading from
+# startingVersion=1 then sees the same call once per run it survived — after
+# three runs the analytics claimed 235 calls against 157 rows in the table.
+#
+# Taking the newest version of each id makes the job idempotent to match the
+# MERGE feeding it: running it twice changes nothing.
+from pyspark.sql import Window
+
+latest_per_call = (
+    current
+    .withColumn(
+        "_rn",
+        F.row_number().over(
+            Window.partitionBy("id").orderBy(F.col("_commit_version").desc())
+        ),
+    )
+    .filter(F.col("_rn") == 1)
+    .drop("_rn")
+    # pytest logs a `test_tool` call of its own. The app already filters it out
+    # of the panel it renders; the analytical copy has to agree, or the two
+    # views of the same feed disagree about what the agent did.
+    .filter(~F.col("tool_name").startswith("test_"))
+)
+
+print(f"{current.count()} change record(s) -> {latest_per_call.count()} distinct tool call(s)")
+
 analytics = (
-    current.groupBy("tool_name")
+    latest_per_call.groupBy("tool_name")
     .agg(
         F.count("*").alias("call_count"),
         F.sum(F.when(F.col("is_write"), 1).otherwise(0)).alias("write_count"),
