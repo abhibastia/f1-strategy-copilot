@@ -84,7 +84,7 @@ flowchart TB
         O["Open-Meteo archive<br/>ERA5 observations"]
     end
 
-    J --> LAND["UC Volume<br/>raw JSON"] --> PIPE["Spark medallion<br/>Bronze to Silver to Gold"]
+    J --> LAND["UC Volume<br/>raw JSON"] --> PIPE["Spark medallion<br/>Bronze → Silver → Gold"]
     PIPE --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression")]
 
     GOLD -- "seeded once" --> LB

@@ -69,21 +69,21 @@ lives in the prose. See [`DESIGN.md`](DESIGN.md) for the full reasoning.
 
 ```mermaid
 flowchart TD
-    subgraph SRC["Third-party APIs"]
+    subgraph SRC[" Third-party APIs "]
         direction LR
-        J["Jolpica-F1<br/>results · standings<br/>pit stops · laps"]
-        W["Wikimedia<br/>race reports"]
-        O["Open-Meteo<br/>ERA5 archive"]
+        J["Jolpica-F1<br/><small>results · standings<br/>pit stops · laps</small>"]
+        W["Wikimedia<br/><small>race reports</small>"]
+        O["Open-Meteo<br/><small>ERA5 archive</small>"]
     end
 
-    subgraph DBX["Databricks jobs and pipeline"]
+    subgraph DBX[" Databricks Jobs &amp; Pipeline "]
         direction TB
-        ING["f1_ingest_incremental<br/>Job · Jolpica to Volume"]
-        MED["f1_medallion_pipeline<br/>Lakeflow · Bronze to Silver to Gold<br/>SCD-2 via AUTO CDC"]
-        HAR["f1_harvest<br/>Job · reports · weather · stops"]
-        SEED["f1_seed_lakebase<br/>Job · Gold to Lakebase"]
-        EMB["f1_embed<br/>Job · chunk to 384-dim vectors"]
-        CDF["f1_cdf_analytics<br/>Job · Change Data Feed"]
+        ING["f1_ingest_incremental<br/><small>Job · Jolpica → Volume</small>"]
+        MED["f1_medallion_pipeline<br/><small>Lakeflow · Bronze → Silver → Gold<br/>SCD-2 via AUTO CDC</small>"]
+        HAR["f1_harvest<br/><small>Job · reports · weather · stops</small>"]
+        SEED["f1_seed_lakebase<br/><small>Job · Gold → Lakebase</small>"]
+        EMB["f1_embed<br/><small>Job · chunk → 384-dim vectors</small>"]
+        CDF["f1_cdf_analytics<br/><small>Job · Change Data Feed</small>"]
     end
 
     J --> ING --> VOL[("UC Volume<br/>f1.raw.landing")] --> MED
@@ -98,14 +98,14 @@ flowchart TD
     SEED --> LB
     EMB --> LB
 
-    LB[("Lakebase Postgres<br/>races · documents · embeddings · weather<br/>stints · watchlist · notes · predictions<br/>agent_tool_calls")]
+    LB[("Lakebase Postgres<br/><small>races · documents · embeddings · weather<br/>stints · watchlist · notes · predictions<br/>agent_tool_calls</small>")]
 
     LB --> MCP["Databricks App 1<br/>MCP server · 15 tools"]
     LB --> UI["Databricks App 2<br/>Strategy Copilot"]
     UI -. "3 write tools" .-> LB
     MCP -. "3 write tools" .-> LB
 
-    LB --> CDF --> DELTA[("Delta<br/>agent_tool_calls · CDF on<br/>agent_activity_analytics")]
+    LB --> CDF --> DELTA[("Delta<br/>agent_tool_calls <b>CDF on</b><br/>agent_activity_analytics")]
     DELTA --> UI
 
     style SRC fill:transparent,stroke:#6b7280,stroke-dasharray:3 3
