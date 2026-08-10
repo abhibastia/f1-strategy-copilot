@@ -84,7 +84,7 @@ flowchart TB
         O["Open-Meteo archive<br/>ERA5 observations"]
     end
 
-    J --> LAND["UC Volume<br/>raw JSON"] --> PIPE["Spark medallion<br/>Bronze → Silver → Gold"]
+    J --> LAND["UC Volume<br/>raw JSON"] --> PIPE["Spark medallion<br/>Bronze to Silver to Gold"]
     PIPE --> GOLD[("Delta Gold<br/>driver_performance<br/>championship_progression")]
 
     GOLD -- "seeded once" --> LB
@@ -99,6 +99,7 @@ flowchart TB
     UI -- "logged" --> CDF[("Lakebase<br/>agent_tool_calls<br/>CDF source")]
     CDF -- "Change Data Feed" --> DELTA[("Delta<br/>agent_activity_analytics")]
     DELTA --> UI
+    style SRC fill:transparent,stroke:#6b7280,stroke-dasharray:3 3
 ```
 
 ## 6. The two-store split
