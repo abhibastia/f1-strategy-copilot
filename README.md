@@ -100,7 +100,7 @@ flowchart TD
 
     LB[("Lakebase Postgres<br/><small>races · documents · embeddings · weather<br/>stints · watchlist · notes · predictions<br/>agent_tool_calls</small>")]
 
-    LB --> MCP["Databricks App 1<br/>MCP server · 14 tools"]
+    LB --> MCP["Databricks App 1<br/>MCP server · 15 tools"]
     LB --> UI["Databricks App 2<br/>Strategy Copilot"]
     UI -. "3 write tools" .-> LB
     MCP -. "3 write tools" .-> LB
@@ -136,7 +136,7 @@ a warehouse query per question dies mid-demo. Gold is seeded into Postgres once 
 | `pipeline/` | **Spark medallion pipeline**: ingestion, Bronze→Gold, Asset Bundle, validation SQL |
 | `harvest/` | Wikipedia race reports, Open-Meteo weather, Jolpica pit stops and laps |
 | `f1lake/` | Lakebase schema, loaders, embedding, Gold→Lakebase seeding |
-| `mcp_server/` | MCP server app — 14 tools over streamable HTTP |
+| `mcp_server/` | MCP server app — 15 tools over streamable HTTP |
 | `app/` | Strategy Copilot app — frontend, in-process agent, queries |
 | `notebooks/` | Change Data Feed → Delta analytics job |
 | `tests/` | Unit tests for chunking, resolution, thresholds, stints |
@@ -322,7 +322,7 @@ was never committed still returns a plausible row to the caller that made it.
 
 ## 6. The agent
 
-**14 tools — 11 read, 3 write.** Full definitions in
+**15 tools — 12 read, 3 write.** Full definitions in
 [`mcp_server/f1_mcp_server.py`](mcp_server/f1_mcp_server.py); the in-app agent
 uses the same `f1_broker` functions so both surfaces run identical code.
 
@@ -332,7 +332,13 @@ uses the same `f1_broker` functions so both surfaces run identical code.
 | `get_championship_standings` · `get_race_weather` | **`log_prediction`** |
 | `find_wet_races` · `search_race_reports` | **`save_race_note`** |
 | `get_race_strategy` · `find_strategy_races` | |
+| `get_season_schedule` | |
 | `get_watchlist` · `get_predictions` · `get_race_notes` | |
+
+`get_season_schedule` exists so a conversational follow-up can resolve. Every
+other per-race tool needs the race named up front, which left "what about the
+next race in that season?" unanswerable — the model passed the phrase through as
+a race name, failed to resolve it, and answered from a report search instead.
 
 Writes mutate Lakebase and return the row they stored, so the agent confirms
 rather than asserts. Ten example transcripts — strategy, evidence, narrative, comparison, three
@@ -344,6 +350,35 @@ model saw is in [`data/demo_transcripts.json`](data/demo_transcripts.json).
 `suggestion` field on an error rather than guessing; report what a name resolved
 to, so a wrong match is visible; treat missing weather as *no data*, never as
 *fair weather*.
+
+### Using it
+
+The copilot is docked to the left of every page rather than placed in the
+scroll, because a reader reaching the strategy table — the point most likely to
+raise a question — should not have to scroll back several screens to ask it.
+Collapsible; below 68rem it becomes an overlay so the tables keep the width.
+
+Every answer shows the calls that produced it **and what each one returned**:
+
+```
+READ  get_race_weather(race="Monza", season=2024)
+  ↳ Italian Grand Prix · 19.1 mm · heavy rain · flagged wet by rainfall
+READ  search_race_reports(query="Monza 2024 wet or dry track", top_k=5)
+  ↳ 5 passages · top 0.51
+```
+
+A tool name on its own proves nothing — it reads the same whether the tool
+answered or returned an empty row. The value is what makes the trace evidence,
+and it is why the answer above ("the report does not mention the track being
+wet") can be checked rather than trusted.
+
+Weather deliberately reports **"flagged wet by rainfall"** rather than "wet
+race": `was_wet` is derived from the daily total alone, so the short form sat
+directly above answers correctly saying the track was dry.
+
+Writes are marked in red with the stored row id, and link to section 06 where
+the row appears. Follow-up chips are regenerated from each answer's tool calls,
+so a suggestion can only ever be a question this corpus can answer.
 
 ---
 
@@ -401,3 +436,10 @@ ingest and is distinct from the Change Data Feed loop above.
 - **Lap times are harvested but not yet used** for per-stint pace (57/59 races).
 - **Single user.** Writes are keyed `user_id='default'`; the column exists so
   multi-user is a change of value, not of schema.
+- **First search in a container is slow.** `search_race_reports` averages ~4 s
+  against ~100 ms for the SQL tools, because the embedding model loads on first
+  use per container. Subsequent calls are fast. Visible in the app's own
+  analytics, which is the point of surfacing them.
+- **The published dashboard can serve a stale snapshot.** Tiles added after the
+  last publish render empty until it is republished; the underlying queries are
+  correct, and `pipeline/sql/dq_event_log.sql` returns the same numbers.

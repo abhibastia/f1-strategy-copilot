@@ -41,7 +41,7 @@ the reason it fails is the interesting part.
 | The system, end to end | `README.md` — architecture diagram, setup, how to run each part |
 | The agent working, with tool calls | `RESULTS.md` — 10 transcripts, 12 tool calls, 3 database writes |
 | The Spark medallion pipeline | `pipeline/` — bronze → silver → gold, SCD Type 2 |
-| It running | The Strategy Copilot URL above, section 01 |
+| It running | The Strategy Copilot URL above — ask the panel on the left |
 
 ## What is here
 
@@ -51,11 +51,11 @@ the reason it fails is the interesting part.
 | Unstructured data | 728 race-report sections, 1,065 embeddings, HNSW cosine index in Lakebase `pgvector` |
 | Agent + MCP server | 15 tools over streamable HTTP; 3 of them write |
 | Change Data Feed | `notebooks/cdf_agent_analytics.py` — agent tool calls → Delta with CDF → `table_changes()` → analytics |
-| Frontend | Flask app, 8 sections, chat with visible tool traces, light/dark/system theme |
-| Tests | 64, all passing — `pytest tests/ -q` |
+| Frontend | Flask app — docked copilot with visible tool traces, 7 sections, light/dark/system theme |
+| Tests | 77, all passing — `pytest tests/ -q`; 29 run with no database |
 | Jobs and pipelines | `databricks.yml` + `resources/f1_jobs.yml` — deploy with `databricks bundle deploy` |
 
-31 commits, 72 files, ~7,400 lines of Python.
+45 commits, 76 files, ~7,700 lines of Python.
 
 ## Screenshots
 
