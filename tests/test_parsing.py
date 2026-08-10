@@ -121,3 +121,36 @@ class TestWeatherThreshold:
 
     def test_missing_code_does_not_raise(self):
         assert describe(None) == "unknown conditions"
+
+
+class TestErrorMessagesAreSafe:
+    """Tool errors travel: an exception message becomes an "error" field in the
+    tool result, which the agent repeats and the UI renders in the trace. A
+    psycopg2 failure names the host and role it could not reach."""
+
+    def test_database_errors_do_not_leak_the_connection_target(self):
+        import psycopg2
+        from f1lake import schema
+        try:
+            psycopg2.connect(
+                "postgresql://someuser:hunter2@secret-host.example.com:5432/db",
+                connect_timeout=1)
+            raise AssertionError("expected the connection to fail")
+        except psycopg2.Error as exc:
+            safe = schema.safe_message(exc)
+        assert "secret-host" not in safe
+        assert "someuser" not in safe and "hunter2" not in safe
+        assert safe == "The database is unavailable."
+
+    def test_messages_written_for_users_pass_through(self):
+        """UnknownRaceError and friends subclass ValueError and are already
+        phrased for a reader - replacing them would make the agent less able to
+        explain itself, not more secure."""
+        from f1lake import schema
+        assert schema.safe_message(
+            ValueError('No race matched "Foo" in 2024.')) == 'No race matched "Foo" in 2024.'
+
+    def test_unexpected_types_are_replaced(self):
+        from f1lake import schema
+        assert schema.safe_message(RuntimeError("/etc/secrets/token: permission denied")) \
+            == "The request could not be completed."

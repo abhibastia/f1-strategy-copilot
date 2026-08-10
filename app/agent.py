@@ -313,7 +313,7 @@ def ask(question: str, history: list[dict] | None = None,
                     "error": "unknown_tool", "message": f"No tool named {name}"}
             except Exception as exc:
                 logger.exception("Tool %s failed", name)
-                result = {"error": "tool_failed", "message": str(exc),
+                result = {"error": "tool_failed", "message": schema.safe_message(exc),
                           "suggestion": "Tell the user the lookup failed. Do not guess."}
             duration_ms = int((time.perf_counter() - started) * 1000)
             trimmed = _trim(name, result)

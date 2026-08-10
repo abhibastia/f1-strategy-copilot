@@ -66,6 +66,27 @@ def lakebase_url() -> str:
     return _cached_url
 
 
+def safe_message(exc: Exception) -> str:
+    """An exception message that is safe to show a user.
+
+    psycopg2 puts the connection target in its errors - `could not translate
+    host name "ep-....cloud.databricks.com"`, and for an auth failure the role
+    name too. Those strings travel: a tool failure becomes an "error" field in
+    the tool result, which the agent repeats and the UI renders in the trace.
+    A Lakebase outage would therefore print the database hostname into every
+    visitor's browser.
+
+    Errors we raise ourselves are written for users and pass through unchanged.
+    Anything else is replaced; the detail is still logged server-side, where it
+    belongs.
+    """
+    if isinstance(exc, (ValueError, LookupError)):
+        return str(exc)
+    if isinstance(exc, psycopg2.Error):
+        return "The database is unavailable."
+    return "The request could not be completed."
+
+
 @contextmanager
 def connection():
     conn = psycopg2.connect(lakebase_url(), cursor_factory=RealDictCursor)

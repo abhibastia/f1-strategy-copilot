@@ -38,6 +38,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 
 import f1_broker
 from f1_broker import UnknownDriverError, UnknownRaceError
+from f1lake import schema
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("f1-mcp-server")
@@ -61,8 +62,12 @@ def _error(exc: Exception, context: str) -> dict:
     if isinstance(exc, ValueError):
         return {"error": "invalid_arguments", "message": str(exc), "context": context,
                 "suggestion": "Correct the arguments and try once more."}
+    # str(exc) here is whatever the driver raised. psycopg2 names the host and
+    # role it failed to reach, and this message is repeated by the agent and
+    # rendered in the UI trace - so the detail goes to the log, not the caller.
     logger.exception("Unexpected failure: %s", context)
-    return {"error": "unexpected_error", "message": str(exc), "context": context,
+    return {"error": "unexpected_error", "message": schema.safe_message(exc),
+            "context": context,
             "suggestion": "Tell the user the request failed. Do not invent data."}
 
 
