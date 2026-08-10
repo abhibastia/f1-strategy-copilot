@@ -159,11 +159,47 @@ a warehouse query per question dies mid-demo. Gold is seeded into Postgres once 
   internet for in-platform API calls)
 - Databricks CLI ≥ 0.294, authenticated: `databricks auth login --profile <profile>`
 - Python 3.11+ locally
-- A Lakebase project, and a Unity Catalog catalog named `f1`
+- A Unity Catalog catalog named `f1`
   (**Free Edition cannot create catalogs over the API** — make it once in the UI:
   Catalog → Create catalog → `f1` → Default storage)
 
-### 4.2 Secrets
+### 4.2 Lakebase
+
+The serving store. Create a project, add a role you control the password for,
+and note the endpoint host — those three values become the connection URL in
+§4.3.
+
+```bash
+PROJECT=f1-copilot
+databricks postgres create-project $PROJECT \
+  --json '{"spec": {"display_name": "F1 Strategy Copilot"}}' --profile <profile>
+
+# The project auto-creates a `production` branch and a `primary` endpoint.
+databricks postgres list-branches  projects/$PROJECT --profile <profile>
+databricks postgres list-endpoints projects/$PROJECT/branches/production --profile <profile>
+```
+
+Take `status.hosts.host` from the endpoint — that is `<host>`.
+
+Then create a **native Postgres role** with a password. A role is used rather
+than the short-lived OAuth credential Databricks also offers: those expire after
+an hour, and refreshing them inside a long-running app is a failure mode this
+project did not need. The trade-off is that the password does not rotate — see
+§9.
+
+```bash
+databricks postgres create-role projects/$PROJECT/branches/production <role> \
+  --json '{"spec": {"password": "<password>"}}' --profile <profile>
+```
+
+> Run `databricks postgres create-role --help` first — the flag shape has moved
+> between CLI versions, and guessing it wastes a round trip.
+
+The database is `databricks_postgres` unless you changed it. `ensure_schema()`
+(§5, Step 7) creates every table, index, and the two extensions it needs —
+`vector` for embeddings and `unaccent` for name matching.
+
+### 4.3 Secrets
 
 One secret: a base64-encoded Postgres connection URL for a **native** Postgres
 role, so setup is a single value rather than five environment variables.
@@ -175,19 +211,12 @@ printf 'postgresql://<role>:<password>@<host>:5432/databricks_postgres?sslmode=r
   | databricks secrets put-secret database lakebase-url --profile <profile>
 ```
 
-Grant **both** app service principals read access — app SPs are not members of
-`users`, so a group grant is not enough and the app will boot fine then fail on
-its first database call:
+Both apps also need read access on this scope — but their service principals do
+not exist until the apps are created, so **that grant is Step 3b in §5**, not
+here. App SPs are not members of `users`, so a group grant is not enough: the
+app boots fine and then fails on its first database call.
 
-```bash
-for APP in mcp-f1-race-companion f1-companion-ui; do
-  SP=$(databricks apps get "$APP" --profile <profile> -o json \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin)["service_principal_client_id"])')
-  databricks secrets put-acl database "$SP" READ --profile <profile>
-done
-```
-
-### 4.3 Environment variables
+### 4.4 Environment variables
 
 Copy [`.env.example`](.env.example). No API keys exist in this project —
 Jolpica, Wikimedia and Open-Meteo are all free and keyless.
@@ -199,14 +228,14 @@ Jolpica, Wikimedia and Open-Meteo are all free and keyless.
 | `F1_LANDING_DIR` | landing files for the race spine | `~/Projects/formula1-capstone-project/landing` |
 | `WIKI_USER_AGENT` | Wikipedia requires a contact string | placeholder |
 
-### 4.4 Local environment
+### 4.5 Local environment
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 export DATABRICKS_CONFIG_PROFILE=<profile>
 ```
 
-### 4.5 Runtime
+### 4.6 Runtime
 
 Everything is **serverless** — no cluster to size. The Lakeflow pipeline and the
 jobs run on serverless compute; the apps run on Databricks Apps compute. Library
@@ -219,11 +248,17 @@ requirements are declared per component in `requirements-dev.txt`,
 
 ### Step 1 — Spark pipeline (Databricks)
 
+`pipeline/databricks.yml` names this project's workspace in both targets, as a
+bundle target is meant to. **Change `targets.dev.workspace.host` to your own**,
+and `var.warehouse_id` to a warehouse in it (`databricks warehouses list`).
+
 ```bash
 cd pipeline
 ./scripts/create_catalog.sh                        # schemas + landing Volume
 databricks bundle validate --strict -t dev --profile <profile>
 databricks bundle deploy -t dev --profile <profile>
+# the bundle prints the job id on deploy; or look it up:
+#   databricks jobs list --profile <profile> | grep f1_ingest_incremental
 databricks jobs run-now --json '{"job_id":<id>,"only":["ingest"]}' --profile <profile>
 databricks bundle run f1_medallion_pipeline -t dev --profile <profile>
 ```
@@ -234,8 +269,13 @@ Loader through Bronze → Silver → Gold. Writes are idempotent: a round is *cl
 once a later round exists with a non-empty results payload, and closed rounds are
 skipped, so a re-run makes ~8 API calls rather than ~260.
 
-Sample input data: `data/pitstops/*.json` is committed. The full landing set is
-reproducible with `python3 pipeline/ingestion/ingest.py --mode backfill --root ./landing`.
+**No input data ships with this repository**, and none is needed. The ingest job
+fetches everything from Jolpica inside Databricks. `data/` is harvested output —
+regenerated by the steps below, not committed, because it was two thirds of the
+repository's text.
+
+To backfill every season at once rather than incrementally:
+`python3 pipeline/ingestion/ingest.py --mode backfill --root ./landing`.
 
 ### Step 2 — Harvest text and weather (local, no Databricks compute)
 
@@ -252,6 +292,28 @@ begins.
 
 ### Step 3 — Deploy the two apps
 
+**3a. Create both apps.** They must exist before anything can be deployed to
+them, and their service principals do not exist until they do.
+
+```bash
+databricks apps create mcp-f1-race-companion --profile <profile>
+databricks apps create f1-companion-ui       --profile <profile>
+```
+
+**3b. Grant those service principals read on the secret scope.** Deferred from
+§4.3 because it needs the SPs that step 3a just created. Skip it and the apps
+start cleanly, then fail on their first database call:
+
+```bash
+for APP in mcp-f1-race-companion f1-companion-ui; do
+  SP=$(databricks apps get "$APP" --profile <profile> -o json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["service_principal_client_id"])')
+  databricks secrets put-acl database "$SP" READ --profile <profile>
+done
+```
+
+**3c. Build the payload, sync, deploy.**
+
 ```bash
 ./scripts/build_app.sh mcp_server && ./scripts/build_app.sh app
 databricks sync mcp_server /Workspace/Users/<you>/mcp-f1-race-companion --profile <profile> --full
@@ -261,16 +323,45 @@ databricks apps deploy mcp-f1-race-companion \
 # repeat for app/ → f1-companion-ui
 ```
 
+**3d.** Point the UI at *your* MCP server. `app/app.yaml` ships with
+`MCP_SERVER_URL` set to this project's deployment; it is only the footer link,
+but it will be wrong. Replace it with the URL from
+`databricks apps get mcp-f1-race-companion` and redeploy.
+
 > `apps deploy` fails on a stopped app with *"not in RUNNING state"* — start first.
 > `app.yaml` must sit at the **root** of the synced path.
+> `build_app.sh` copies `f1lake/` and `f1_broker.py` into each app directory,
+> because a Databricks App deploys from a single source path and cannot import a
+> sibling package.
 
 ### Step 4 — Change Data Feed analytics
 
+`cdf_job.json` carries an absolute `notebook_path` under this project's user
+directory. **Edit it to your own** before submitting, or the job runs someone
+else's notebook — or nothing:
+
 ```bash
-databricks workspace import /Workspace/Users/<you>/f1-strategy-copilot/cdf_agent_analytics \
-  --file notebooks/cdf_agent_analytics.py --language PYTHON --format SOURCE --overwrite --profile <profile>
+WS=/Workspace/Users/<you>/f1-strategy-copilot
+python3 - <<'EOF'
+import json, pathlib
+p = pathlib.Path("cdf_job.json"); d = json.loads(p.read_text())
+d["tasks"][0]["notebook_task"]["notebook_path"] = "<WS>/cdf_agent_analytics"
+p.write_text(json.dumps(d, indent=2))
+EOF
+
+databricks workspace import $WS/cdf_agent_analytics \
+  --file notebooks/cdf_agent_analytics.py --language PYTHON --format SOURCE \
+  --overwrite --profile <profile>
 databricks jobs submit --json @cdf_job.json --profile <profile>
 ```
+
+> The bundle also defines this job (`resources/f1_jobs.yml`), but it fails
+> reproducibly on serverless with `Fatal Python error: Aborted` while the
+> identical notebook submitted directly succeeds. The caveat is documented there
+> and in `SUBMISSION.md`; `jobs submit` is the path that works.
+
+The job is idempotent — the MERGE skips rows already landed, and the feed read
+takes the newest version of each id, so running it twice changes nothing.
 
 ### Step 5 — Tests
 

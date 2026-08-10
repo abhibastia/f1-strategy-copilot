@@ -167,6 +167,13 @@ def execute(sql: str, params: tuple | dict | None = None) -> int:
 
 DDL = [
     "CREATE EXTENSION IF NOT EXISTS vector",
+    # Name resolution depends on this. resolve_race and resolve_driver fold
+    # accents so "Sao Paulo" matches "São Paulo" and "Perez" matches "Pérez" -
+    # four call sites in f1_broker. It was installed by hand while fixing that
+    # and never added here, so a database created from this DDL alone had
+    # pgvector but no unaccent: the app would deploy, look healthy, and fail
+    # every single tool call that resolves a name.
+    "CREATE EXTENSION IF NOT EXISTS unaccent",
 
     # --- reference: the race spine, mirrored from Gold ------------------------
     f"""
