@@ -15,14 +15,22 @@ def broker(lakebase):
     return f1_broker
 
 
+@pytest.fixture(scope="module")
+def agent():
+    """The app's agent module. Imported here rather than at file scope because
+    app/ is only put on the path by conftest, and importing it eagerly would
+    make collection fail before any fixture has run."""
+    import sys, os
+    sys.path.insert(0, os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+    import agent as agent_module
+    return agent_module
+
+
 class TestToolWiring:
-    def test_every_advertised_tool_is_callable(self):
+    def test_every_advertised_tool_is_callable(self, agent):
         """A tool in the schema list with no dispatch entry is advertised to the
         model and then fails at call time."""
-        import sys, os
-        sys.path.insert(0, os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
-        import agent
         advertised = {name for name, _, _, _ in agent.TOOLS}
         assert advertised == set(agent.DISPATCH), (
             advertised.symmetric_difference(set(agent.DISPATCH)))
@@ -95,3 +103,69 @@ class TestTelemetry:
             raise RuntimeError("database on fire")
         monkeypatch.setattr(lakebase, "connection", explode)
         lakebase.log_tool_call("t", {}, "ok")   # must not raise
+
+
+class TestTraceEvidence:
+    """The trace is the project's evidence that an answer came from data. A tool
+    name alone does not carry that - it reads identically whether the tool
+    answered or returned an empty row."""
+
+    def test_weather_evidence_names_the_source_not_the_conclusion(self, agent):
+        """was_wet is derived from the daily rainfall total alone. Rendering it
+        as "wet race" put that phrase directly above answers that correctly say
+        the track was dry, which reads as self-contradiction rather than as the
+        report overruling the rainfall."""
+        ev = agent._evidence("get_race_weather", {
+            "resolved_race": "Italian Grand Prix", "precipitation_mm": 19.1,
+            "conditions": "heavy rain", "was_wet": True})
+        assert "19.1 mm" in ev
+        assert "flagged wet by rainfall" in ev
+        assert "wet race" not in ev
+
+    def test_evidence_reports_retrieval_depth(self, agent):
+        ev = agent._evidence("search_race_reports",
+                             {"results": [{"similarity": 0.61}, {"similarity": 0.4}]})
+        assert "2 passages" in ev and "0.61" in ev
+
+    def test_error_evidence_surfaces_the_message(self, agent):
+        ev = agent._evidence("get_race_strategy",
+                             {"error": "not_found", "message": "No race matched 'Foo'"})
+        assert "No race matched" in ev
+
+
+class TestFollowups:
+    """Follow-ups are read off the trace rather than generated, so a suggestion
+    can only ever be a question this corpus can answer."""
+
+    def test_followups_use_the_resolved_race(self, agent):
+        out = agent._followups([{
+            "tool": "get_race_strategy", "arguments": {"season": 2024, "race": "Sao Paulo"},
+            "result": {"resolved_race": "São Paulo Grand Prix"}, "is_write": False}])
+        assert any("São Paulo Grand Prix" in q for q in out)
+        assert len(out) == 3
+
+    def test_no_followup_repeats_a_tool_already_called(self, agent):
+        """Suggesting the weather after the weather was just fetched wastes the
+        one place the user is looking for what to do next."""
+        trace = [{"tool": "get_race_weather", "arguments": {"season": 2024, "race": "Monza"},
+                  "result": {"resolved_race": "Italian Grand Prix"}, "is_write": False}]
+        assert not any(q.startswith("Was the 2024 Italian Grand Prix actually a wet")
+                       for q in agent._followups(trace))
+
+    def test_write_evidence_carries_the_stored_row_id(self, agent):
+        """A write that never commits looks identical to one that worked. The
+        id comes back from the database, so showing it in the trace is what
+        distinguishes "a call was made" from "a row exists"."""
+        ev = agent._evidence("save_race_note",
+                             {"written": True, "action": "save_race_note",
+                              "row": {"id": 18, "season": 2024, "round": 16}})
+        assert "id 18" in ev
+
+    def test_a_write_offers_to_show_what_was_saved(self, agent):
+        out = agent._followups([{
+            "tool": "add_to_watchlist", "arguments": {"entity_ref": "Norris"},
+            "result": {"written": True, "id": 7}, "is_write": True}])
+        assert out[0] == "Show me everything you have saved"
+
+    def test_empty_trace_still_offers_something(self, agent):
+        assert len(agent._followups([])) == 3

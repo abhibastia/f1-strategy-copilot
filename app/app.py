@@ -63,6 +63,7 @@ def index():
             standings=ui_data.standings(season) if season else [],
             activity=ui_data.agent_activity(),
             analytics=ui_data.agent_analytics(),
+            sessions=ui_data.recent_sessions(),
             strategy=ui_data.strategy_races(season) if season else [],
             mcp_url=MCP_URL,
             error=None,
@@ -75,7 +76,7 @@ def index():
         return render_template(
             "index.html", stats={}, thresholds=[], thesis=[], seasons=[],
             season=None, races=[], standings=[], activity={},
-            analytics={"tools": [], "totals": {}}, strategy=[],
+            analytics={"tools": [], "totals": {}}, sessions=[], strategy=[],
             mcp_url=MCP_URL, error=schema.safe_message(exc),
         )
 

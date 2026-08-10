@@ -192,6 +192,59 @@ def agent_analytics() -> dict:
     return {"tools": tools, "totals": totals}
 
 
+def recent_sessions(limit: int = 6) -> list[dict]:
+    """The last few conversations, each with the calls it made in order.
+
+    The per-tool aggregate above says `get_race_weather` was called 31 times at
+    an average of 240 ms. True, and impossible to picture. What a reader wants
+    to know is what one conversation actually did: which tools, in what order,
+    how long each took and whether it worked. That is the same Change Data Feed
+    data at the grain it is legible at.
+
+    Grouped by session rather than listed flat because the ordering within a
+    conversation is the interesting part - a weather call followed by two
+    searches is a visible reasoning path, where the same three rows shuffled
+    together with other sessions' calls are noise.
+    """
+    rows = schema.query(f"""
+        WITH recent AS (
+            SELECT session_id,
+                   max(called_at)                          AS last_at,
+                   count(*)                                AS calls,
+                   sum(duration_ms)                        AS total_ms,
+                   count(*) FILTER (WHERE is_write)        AS writes,
+                   count(*) FILTER (WHERE outcome <> 'ok') AS errors
+            FROM {schema.TOOL_CALLS}
+            WHERE tool_name NOT LIKE 'test\\_%%' ESCAPE '\\'
+            GROUP BY session_id
+            ORDER BY max(called_at) DESC
+            LIMIT %s
+        )
+        SELECT c.session_id, c.called_at, c.tool_name, c.is_write, c.outcome,
+               c.summary, c.duration_ms,
+               r.last_at, r.calls, r.total_ms, r.writes, r.errors
+        FROM {schema.TOOL_CALLS} c
+        JOIN recent r ON r.session_id = c.session_id
+        WHERE c.tool_name NOT LIKE 'test\\_%%' ESCAPE '\\'
+        ORDER BY r.last_at DESC, c.id""", (max(1, min(int(limit), 20)),))
+
+    sessions: list[dict] = []
+    for row in rows:
+        if not sessions or sessions[-1]["session_id"] != row["session_id"]:
+            sessions.append({
+                "session_id": row["session_id"],
+                "last_at": row["last_at"], "calls": row["calls"],
+                "total_ms": row["total_ms"], "writes": row["writes"],
+                "errors": row["errors"], "steps": [],
+            })
+        sessions[-1]["steps"].append({
+            "tool_name": row["tool_name"], "is_write": row["is_write"],
+            "outcome": row["outcome"], "summary": row["summary"],
+            "duration_ms": row["duration_ms"],
+        })
+    return sessions
+
+
 def strategy_races(season: int, limit: int = 12) -> list[dict]:
     """Races ranked by how much strategy varied — where stop counts differed
     most between drivers, which is where the interesting decisions were."""
