@@ -34,4 +34,4 @@ resources:
 
       libraries:
         - glob:
-            include: ../src/pipeline/**
+            include: ../medallion/**

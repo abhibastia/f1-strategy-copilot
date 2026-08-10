@@ -36,6 +36,11 @@ def _get(url, params):
         except requests.RequestException as exc:
             if attempt == MAX_RETRIES - 1:
                 raise
+            # Say so. A silent retry makes a run that fought the network for a
+            # minute indistinguishable from one that sailed through, which is
+            # exactly the thing you want to know when a harvest is slow.
+            logger.warning("  %s, retrying (%d/%d)", type(exc).__name__,
+                           attempt + 1, MAX_RETRIES)
             time.sleep(2 ** attempt + 1)
     raise RuntimeError("unreachable")
 

@@ -1,0 +1,67 @@
+# Checks that run without credentials.
+#
+# WHAT THIS DELIBERATELY DOES NOT RUN
+# -----------------------------------
+# 48 of the 77 tests are marked `integration` and need a live Lakebase
+# connection. The bug they exist to catch - an INSERT ... RETURNING that hands
+# back a row and then rolls back when the connection closes - does not
+# reproduce against a fake, so they are not mockable in any useful way.
+#
+# Running them here would mean putting a Postgres URL carrying a real password
+# into repository secrets. That is a credential leaving the owner's control to
+# buy a green tick, and the tick would prove less than the local run already
+# does. They stay a pre-deploy step, run with `pytest tests/`.
+#
+# What is left still earns its place: the expectation checker catches typos
+# that otherwise cost a pipeline run to discover, pyflakes has already found
+# three real bugs in this repository, and the 29 parsing and safety tests cover
+# the pure functions where regressions are silent.
+
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: |
+          python -m pip install --quiet --upgrade pip
+          # Not requirements-dev.txt: that pulls sentence-transformers and
+          # torch, ~2 GB, for tests that never load a model here.
+          #
+          # psycopg2 and requests are needed even though nothing connects or
+          # fetches: test_parsing imports f1lake.load and harvest.weather,
+          # which import them at module scope, so pytest fails during
+          # COLLECTION rather than at any assertion. "Needs no credentials" is
+          # not the same as "needs no dependencies".
+          #
+          # sentence-transformers stays out on purpose - embedder.py imports it
+          # inside the function that builds the model, so nothing here triggers
+          # it. Verified in a clean venv: 41 MB, 29 passed.
+          python -m pip install --quiet pytest pyflakes psycopg2-binary requests
+
+      - name: Lint
+        run: |
+          python -m pyflakes app mcp_server f1lake harvest jobs tests scripts \
+            | tee /tmp/pyflakes.txt
+          test ! -s /tmp/pyflakes.txt
+
+      # The rule dicts are shared between a fact and its quarantine view, so one
+      # stale column name fails two datasets - and pipeline expectations are
+      # only validated by graph analysis, which means a cluster start and a
+      # failed update to learn about a typo.
+      - name: Pipeline expectations
+        run: python3 pipeline/scripts/check_expectations.py
+
+      - name: Tests that need no database
+        run: python -m pytest tests/ -q -m "not integration"

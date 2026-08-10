@@ -16,7 +16,7 @@ resources:
       tasks:
         - task_key: ingest
           spark_python_task:
-            python_file: ../src/ingestion/ingest.py
+            python_file: ../ingestion/ingest.py
             # Incremental mode pulls only the live season, and the writer skips
             # rounds that are already closed — roughly 8 API calls per run.
             parameters:

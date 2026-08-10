@@ -40,3 +40,36 @@ def lakebase():
         return schema
     except Exception as exc:
         pytest.skip(f"Lakebase unavailable: {str(exc)[:80]}")
+
+
+@pytest.fixture
+def marker(lakebase):
+    """A unique marker for a write test, removed when the test finishes.
+
+    The write tests exercise the real Lakebase, because the bug they exist to
+    catch - an INSERT ... RETURNING that hands back a row and then rolls back on
+    connection close - only reproduces against a real connection. Free Edition
+    has no second database to point them at.
+
+    What that costs is that every run left rows behind. They accumulated in the
+    same watchlist the app renders under "What the assistant has done", until
+    two dozen `test-*` and `idem-*` entries buried the three real ones - in the
+    section whose entire job is showing what the agent actually did.
+
+    Deleting by exact marker keeps the cleanup surgical: a test can only ever
+    remove rows it created itself, so a crashed run cannot take real data with
+    it.
+    """
+    import uuid as _uuid
+    created: list[str] = []
+
+    def _make(prefix: str) -> str:
+        value = f"{prefix}-{_uuid.uuid4().hex[:8]}"
+        created.append(value)
+        return value
+
+    yield _make
+
+    for value in created:
+        lakebase.execute("DELETE FROM f1_watchlist WHERE entity_ref = %s", (value,))
+        lakebase.execute("DELETE FROM f1_race_notes WHERE note = %s", (value,))

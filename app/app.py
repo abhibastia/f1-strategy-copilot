@@ -25,6 +25,7 @@ from flask import Flask, jsonify, render_template, request
 
 import agent
 import ui_data
+from f1lake import schema
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("f1-strategy-copilot-ui")
@@ -62,6 +63,7 @@ def index():
             standings=ui_data.standings(season) if season else [],
             activity=ui_data.agent_activity(),
             analytics=ui_data.agent_analytics(),
+            sessions=ui_data.recent_sessions(),
             strategy=ui_data.strategy_races(season) if season else [],
             mcp_url=MCP_URL,
             error=None,
@@ -74,8 +76,8 @@ def index():
         return render_template(
             "index.html", stats={}, thresholds=[], thesis=[], seasons=[],
             season=None, races=[], standings=[], activity={},
-            analytics={"tools": [], "totals": {}}, strategy=[],
-            mcp_url=MCP_URL, error=str(exc),
+            analytics={"tools": [], "totals": {}}, sessions=[], strategy=[],
+            mcp_url=MCP_URL, error=schema.safe_message(exc),
         )
 
 
@@ -109,7 +111,7 @@ def api_chat():
         logger.exception("Agent call failed")
         return jsonify({
             "error": "The assistant could not answer that.",
-            "detail": str(exc)[:300],
+            "detail": schema.safe_message(exc),
         }), 503
 
 
@@ -126,7 +128,7 @@ def api_search():
         return jsonify({"query": query, "count": len(results), "results": results})
     except Exception as exc:
         logger.exception("Search failed")
-        return jsonify({"error": str(exc)}), 503
+        return jsonify({"error": schema.safe_message(exc)}), 503
 
 
 if __name__ == "__main__":

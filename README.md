@@ -268,8 +268,55 @@ databricks jobs submit --json @cdf_job.json --profile <profile>
 ### Step 5 — Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -v
+.venv/bin/python -m pytest tests/ -q                    # 77 tests
+.venv/bin/python -m pytest tests/ -q -m "not integration"   # 29, no database needed
 ```
+
+48 tests are marked `integration` and open a real Lakebase connection. They are
+not mockable in any useful way: the bug they exist to catch — an
+`INSERT ... RETURNING` that returns a row and then rolls back when the
+connection closes — only reproduces against a real one. They clean up every row
+they write.
+
+CI (`.github/workflows/checks.yml`) runs the credential-free subset, plus
+`pyflakes` and the pipeline expectation checker. It deliberately does not run
+the integration tests, because that would mean putting a live database password
+into repository secrets to buy a green tick.
+
+### Step 6 — One-command refresh
+
+Rebuilds everything Lakebase serves, in dependency order, reporting the row
+counts each stage changed:
+
+```bash
+python3 scripts/full_refresh.py --dry-run     # what would run, and current counts
+python3 scripts/full_refresh.py               # network + Lakebase stages only
+python3 scripts/full_refresh.py --with-spark  # also the Gold seed and CDF job
+python3 scripts/full_refresh.py --only embed  # a single stage
+```
+
+The Spark stages are opt-in because they spend against Free Edition's daily
+compute quota, which does not reset until the next day. Every stage is
+idempotent, so interrupting a run and starting again is safe.
+
+### Step 7 — Schema and smoke test
+
+```bash
+python3 -m f1lake.schema --ensure   # create every table and index (idempotent)
+python3 -m f1lake.schema --smoke    # write one row, read it back, delete it
+```
+
+`--smoke` is the fastest way to confirm the write path works end to end:
+
+```
+  connecting     … ok
+  wrote          … id 27
+  read back      … id 27
+  cleaned up     … ok
+```
+
+The read-back is the point. It opens a **new** connection, because a write that
+was never committed still returns a plausible row to the caller that made it.
 
 ---
 
