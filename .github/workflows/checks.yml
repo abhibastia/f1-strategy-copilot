@@ -38,7 +38,17 @@ jobs:
           python -m pip install --quiet --upgrade pip
           # Not requirements-dev.txt: that pulls sentence-transformers and
           # torch, ~2 GB, for tests that never load a model here.
-          python -m pip install --quiet pytest pyflakes
+          #
+          # psycopg2 and requests are needed even though nothing connects or
+          # fetches: test_parsing imports f1lake.load and harvest.weather,
+          # which import them at module scope, so pytest fails during
+          # COLLECTION rather than at any assertion. "Needs no credentials" is
+          # not the same as "needs no dependencies".
+          #
+          # sentence-transformers stays out on purpose - embedder.py imports it
+          # inside the function that builds the model, so nothing here triggers
+          # it. Verified in a clean venv: 41 MB, 29 passed.
+          python -m pip install --quiet pytest pyflakes psycopg2-binary requests
 
       - name: Lint
         run: |
