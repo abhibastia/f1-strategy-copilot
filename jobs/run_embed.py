@@ -25,6 +25,5 @@ totals = schema.query("""
     SELECT (SELECT count(*) FROM f1_documents)  AS documents,
            (SELECT count(*) FROM f1_embeddings) AS embeddings""")[0]
 logging.getLogger("embed-job").info(
-    "embedded %d new chunk(s). documents=%(documents)d embeddings=%(embeddings)d"
-    % totals if False else f"embedded {written} new chunk(s). "
-    f"documents={totals['documents']} embeddings={totals['embeddings']}")
+    "embedded %d new chunk(s). documents=%d embeddings=%d",
+    written, totals["documents"], totals["embeddings"])
