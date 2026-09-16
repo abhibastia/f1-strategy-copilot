@@ -1,5 +1,7 @@
 # AI Formula 1 Race Strategy Copilot
 
+This project has moved to https://github.com/abhibastia/f1-intelligence-copilot
+
 **Capstone idea: custom** — the domain is Formula 1 rather than one of the five
 listed options. It follows the same skeleton: Lakebase relational tables,
 embeddings over unstructured text for semantic retrieval, and an agent whose
